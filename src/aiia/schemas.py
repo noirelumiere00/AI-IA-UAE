@@ -1,0 +1,155 @@
+"""型契約（pydantic）。I/O・SDK import 無し → pipelineの純粋性とテスト容易性を担保。"""
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, model_validator
+
+Tone = Literal["neutral", "urgent", "frustrated", "positive", "formal"]
+PriorityLabel = Literal["緊急", "高", "中", "低"]
+Handling = Literal["定型", "非定型"]
+
+
+class Category(str, Enum):
+    CLIENT_URGENT = "CLIENT_URGENT"
+    CLIENT_NORMAL = "CLIENT_NORMAL"
+    PRESS_MEDIA = "PRESS_MEDIA"
+    VENDOR_PARTNER = "VENDOR_PARTNER"
+    INTERNAL = "INTERNAL"
+    FINANCE_LEGAL = "FINANCE_LEGAL"
+    NEWSLETTER = "NEWSLETTER"
+
+
+# 優先度（小さいほど上位）。is_vip は -5 補正（triage.compute_priority）。
+BASE_PRIORITY: dict[Category, int] = {
+    Category.CLIENT_URGENT: 0,
+    Category.PRESS_MEDIA: 10,
+    Category.FINANCE_LEGAL: 20,
+    Category.CLIENT_NORMAL: 30,
+    Category.VENDOR_PARTNER: 40,
+    Category.INTERNAL: 50,
+    Category.NEWSLETTER: 90,
+}
+
+CATEGORY_EMOJI: dict[Category, str] = {
+    Category.CLIENT_URGENT: "🔴",
+    Category.PRESS_MEDIA: "🟠",
+    Category.FINANCE_LEGAL: "🟣",
+    Category.CLIENT_NORMAL: "🟡",
+    Category.VENDOR_PARTNER: "🔵",
+    Category.INTERNAL: "🟢",
+    Category.NEWSLETTER: "⚪",
+}
+
+
+class EmailMessage(BaseModel):
+    message_id: str
+    sender: str = ""
+    sender_domain: str = ""
+    to: list[str] = Field(default_factory=list)
+    subject: str = ""
+    date: Optional[datetime] = None
+    snippet: str = ""
+    body_text: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class EmailThread(BaseModel):
+    thread_id: str
+    subject: str = ""
+    messages: list[EmailMessage] = Field(default_factory=list)
+    has_existing_draft: bool = False
+    labels: list[str] = Field(default_factory=list)
+
+    @property
+    def latest(self) -> Optional[EmailMessage]:
+        return self.messages[-1] if self.messages else None
+
+    @property
+    def sender(self) -> str:
+        m = self.latest
+        return m.sender if m else ""
+
+    @property
+    def sender_domain(self) -> str:
+        m = self.latest
+        return m.sender_domain if m else ""
+
+    @property
+    def body(self) -> str:
+        m = self.latest
+        return m.body_text or (m.snippet if m else "") if m else ""
+
+
+class ClassificationResult(BaseModel):
+    category: Category
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    reasons: list[str] = Field(default_factory=list)
+    is_vip: bool = False
+    priority_label: PriorityLabel = "中"
+    handling: Handling = "非定型"
+    amount_jpy: Optional[int] = None
+    key_person: Optional[str] = None
+    needs_review: bool = False
+
+
+class ActionItem(BaseModel):
+    text: str
+    source_quote: str = ""
+    kind: Literal["action", "question", "deadline"] = "action"
+    deadline: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def _quote_required_for_deadline(self) -> "ActionItem":
+        # 締切は「本文に明示」が前提。原文引用が無ければ無効（推測禁止を構造的に強制）。
+        if (self.kind == "deadline" or self.deadline is not None) and not self.source_quote.strip():
+            raise ValueError("deadline には source_quote（原文引用）が必須です（推測禁止）")
+        return self
+
+
+class ThreadSummary(BaseModel):
+    thread_id: str
+    one_liner: str = ""
+    tone: Tone = "neutral"
+    action_items: list[ActionItem] = Field(default_factory=list)
+
+
+class DraftReply(BaseModel):
+    thread_id: str
+    subject: str = ""
+    body: str = ""
+    rationale: str = ""
+    keigo_level: int = 3
+
+
+class DigestItem(BaseModel):
+    thread_id: str
+    category: Category
+    priority: int
+    subject: str
+    sender: str
+    summary: ThreadSummary
+    classification: ClassificationResult
+    draft: Optional[DraftReply] = None
+    gmail_link: Optional[str] = None
+    needs_review: bool = False
+
+
+class Digest(BaseModel):
+    generated_at: datetime
+    user_id: str
+    items: list[DigestItem] = Field(default_factory=list)
+    counts_by_category: dict[Category, int] = Field(default_factory=dict)
+    quiet_counts: dict[Category, int] = Field(default_factory=dict)
+    processed: int = 0
+    elapsed_seconds: float = 0.0
+
+
+class AgentResult(BaseModel):
+    digest: Digest
+    drafts_created: int = 0
+    labels_applied: int = 0
+    redactions: int = 0
+    dry_run: bool = True

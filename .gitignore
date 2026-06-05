@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Env / secrets — 認証情報は絶対にコミットしない
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs / audit
+logs/
+*.jsonl
+
+# OS
+.DS_Store

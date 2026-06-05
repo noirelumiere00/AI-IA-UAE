@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiia"
+version = "0.1.0"
+description = "AI-IA-UAE — 広告PR会社向けマルチエージェント基盤（第1弾: 朝のメール確認サポートAgent）"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# 本番でBedrock/Claude APIを使う場合のみ。テスト/雛形検証(HeuristicLLM)には不要。
+bedrock = ["anthropic[bedrock]>=0.40"]
+api = ["anthropic>=0.40"]
+dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10", "types-PyYAML"]
+
+[project.scripts]
+aiia-morning-email = "aiia.scripts.run_morning_email:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aiia"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
