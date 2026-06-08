@@ -198,7 +198,27 @@ config/*.yaml(3) / tests/(conftest+各test+fixtures) / docs/(ADR)</pre>
   <p class="note danger">運用注意：チャットに出たアクセスキーは構築後に必ず無効化（ローテーション）し、AdministratorAccessを外す。</p>
 </section>
 
-<footer>AI-IA-UAE Plan Summary ／ 詳細は設計図 plans/shimmying-foraging-ullman.md §0-50 を参照</footer>
+<section>
+  <h2>11. 実装順序（S0 → S10・着手手順）</h2>
+  <p class="note"><b>核心の考え方</b>：外部(AWS/Bedrock/実メール)に繋がない「動く核」を <b>S0–S7</b> で完成 → <b>S8</b> 以降で外部を差し込む。<b>各ステップ末で必ずテスト緑＋1コミット</b>（壊れた途中状態を作らない）。</p>
+  <table>
+    <tr><th>Step</th><th>作る / 触る</th><th>完了（緑）条件</th></tr>
+    <tr><td><b>S0</b></td><td>pyproject（同期確定・coverage omit・ruff/mypy）</td><td><code>pip install -e .[dev]</code> 成功</td></tr>
+    <tr><td><b>S1</b></td><td>mcp/registry（送信禁止ツールの単一真実源）</td><td>test_safety 緑（<span class="danger">送信不可</span>を証明）</td></tr>
+    <tr><td><b>S2</b></td><td>mcp/base(Protocol)＋fake(ニセ部品)</td><td>import smoke 緑</td></tr>
+    <tr><td><b>S3</b></td><td>providers(factory＋schema_tool＋prompts)</td><td>schema_tool / config テスト緑</td></tr>
+    <tr><td><b>S4</b></td><td>pipeline（取得→2段分類→要約→下書き→run）</td><td>test_pipeline 緑（dry-run副作用ゼロ）</td></tr>
+    <tr><td><b>S5</b></td><td>delivery/slack（BlockKit整形・テキスト）</td><td>test_blocks 緑</td></tr>
+    <tr><td><b>S6</b></td><td>orchestrator＋CLI＋config*.yaml(3)</td><td><code>--dry-run</code> が exit 0</td></tr>
+    <tr style="background:#eafaf1"><td><b>S7</b></td><td>tests仕上げ＋eval＋Fake fixtures</td><td><b>第1マイルストーン</b>：<code>--dry-run --profile heuristic</code> が副作用ゼロで緑（ネット/Bedrock不要）・coverage≥80%</td></tr>
+    <tr><td><b>S8</b></td><td>providers/anthropic_llm（Bedrock実推論）</td><td><code>--profile bedrock</code> で実推論</td></tr>
+    <tr><td><b>S9</b></td><td>mcp/harness＋実データfixture（あなたのGmail）</td><td>読取＋下書きのみ・<b>人間確認</b>（送信なし）</td></tr>
+    <tr><td><b>S10</b></td><td>docs(ADR2本)→push</td><td><b>ドラフトPR</b>作成</td></tr>
+  </table>
+  <p class="note">用語：<b>契約凍結(Protocol)</b>＝部品のつなぎ目の形を先に固定／<b>Fake</b>＝本物の代わりのニセ部品／<b>dry-run</b>＝送らず書かず動きだけ確認する空運転。</p>
+</section>
+
+<footer>AI-IA-UAE Plan Summary ／ 詳細は設計図 plans/shimmying-foraging-ullman.md §0-51 を参照</footer>
 </div>
 </body>
 </html>
