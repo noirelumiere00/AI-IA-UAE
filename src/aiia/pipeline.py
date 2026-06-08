@@ -124,6 +124,7 @@ def run(deps: PipelineDeps) -> AgentResult:
 
             # 下書き（対象カテゴリ＆既存下書き無のみ）。プレビューは常に作り、Gmail保存は非dry_run時のみ。
             draft: Optional[DraftReply] = None
+            draft_id: Optional[str] = None
             if cls.category.value in draft_cats and not thread.has_existing_draft:
                 d = deps.llm.draft(thread, summary, deps.user)
                 secrets = find_secrets(d.body)
@@ -132,7 +133,7 @@ def run(deps: PipelineDeps) -> AgentResult:
                     redactions += len(secrets)
                 draft = d
                 if not deps.dry_run:
-                    deps.tools.gmail.create_draft(
+                    draft_id = deps.tools.gmail.create_draft(
                         thread_id=thread.thread_id, subject=d.subject, body=d.body
                     )
                     drafts_created += 1
@@ -160,6 +161,7 @@ def run(deps: PipelineDeps) -> AgentResult:
                     classification=cls,
                     draft=draft,
                     gmail_link=f"https://mail.google.com/mail/u/0/#inbox/{thread.thread_id}",
+                    gmail_draft_id=draft_id,
                     needs_review=cls.needs_review,
                 )
             )

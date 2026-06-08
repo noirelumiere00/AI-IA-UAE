@@ -24,12 +24,11 @@ def test_state_tamper_rejected() -> None:
     assert of.verify_state("not-base64!!", secret=_SECRET) is None
 
 
-def test_scopes_include_send_and_calendar() -> None:
+def test_scopes_are_modify_and_calendar() -> None:
     joined = " ".join(of.WORKSPACE_SCOPES)
-    assert "gmail.readonly" in joined
-    assert "gmail.compose" in joined
-    assert "gmail.send" in joined  # 2回確認送信のため
+    assert "gmail.modify" in joined  # 読取+下書き+送信(drafts.send)+ラベルを1本でカバー(TeamAgent同じ)
     assert "calendar.readonly" in joined
+    assert "gmail.compose" not in joined and "gmail.send" not in joined  # modify一本化
 
 
 def test_connect_client_prefers_connect_then_google(monkeypatch: pytest.MonkeyPatch) -> None:

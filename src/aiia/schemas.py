@@ -134,6 +134,7 @@ class DigestItem(BaseModel):
     classification: ClassificationResult
     draft: Optional[DraftReply] = None
     gmail_link: Optional[str] = None
+    gmail_draft_id: Optional[str] = None  # 非dry_runで作成したGmail下書きID（M2ボタンが編集/削除/送信に使う）
     needs_review: bool = False
 
 

@@ -20,18 +20,19 @@ ACTION_SEND = "aiia_send_reply"
 _ITEM_BLOCK_PREFIX = "aiia_item_"
 
 
-def _item_actions(thread_id: str) -> dict:
-    """各メール項目の操作ボタン。送信は Slack ネイティブ確認(1/2)付き＝2段確認の1段目。"""
+def _item_actions(value: str) -> dict:
+    """各メール項目の操作ボタン。value は Gmail下書きID(無ければthread_id)＝M2ハンドラが対象特定に使う。
+    送信は Slack ネイティブ確認(1/2)付き＝2段確認の1段目。"""
     return {
         "type": "actions",
-        "block_id": f"{_ITEM_BLOCK_PREFIX}{thread_id}",
+        "block_id": f"{_ITEM_BLOCK_PREFIX}{value}",
         "elements": [
             {"type": "button", "action_id": ACTION_EDIT,
-             "text": {"type": "plain_text", "text": "📝 編集"}, "value": thread_id},
+             "text": {"type": "plain_text", "text": "📝 編集"}, "value": value},
             {"type": "button", "action_id": ACTION_DELETE,
-             "text": {"type": "plain_text", "text": "🗑 削除"}, "value": thread_id},
+             "text": {"type": "plain_text", "text": "🗑 削除"}, "value": value},
             {"type": "button", "action_id": ACTION_SEND, "style": "primary",
-             "text": {"type": "plain_text", "text": "📤 送信"}, "value": thread_id,
+             "text": {"type": "plain_text", "text": "📤 送信"}, "value": value,
              "confirm": {
                  "title": {"type": "plain_text", "text": "送信の確認 (1/2)"},
                  "text": {"type": "mrkdwn", "text": "この下書きを送信しますか？次の画面でもう一度確認します。"},
@@ -135,8 +136,9 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
                 f"*{it.sender}*{flag}\n件名: {it.subject}\n要約: {it.summary.one_liner}{dl_line}{draft_line}{link}"
             ))
             # 下書きのある項目だけ操作ボタン（編集/削除/送信）。送信は2段確認の1段目付き。
+            # value=Gmail下書きID(M2ハンドラが drafts.update/send/delete に使用)・無ければthread_id。
             if interactive and it.draft and len(blocks) < _MAX_BLOCKS - 2:
-                blocks.append(_item_actions(it.thread_id))
+                blocks.append(_item_actions(it.gmail_draft_id or it.thread_id))
 
     quiet_txt = " ・ ".join(
         f"{CATEGORY_EMOJI[c]} {c.value} ({n})"

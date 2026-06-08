@@ -3,8 +3,9 @@
 各社員が自分のGoogleを個別に許可する3-legged同意。state を HMAC署名して callback で
 「誰の認可か」を改竄なく検証（CSRF/なりすまし対策）。google-auth-oauthlib は遅延 import。
 
-スコープ（ユーザー確定）: gmail.readonly(受信+送信済みで文体) / gmail.compose(下書き) /
-gmail.send(2回確認送信) / calendar.readonly。送信は実行側で2段人間確認ゲートを通す。
+スコープ（ユーザー確定・TeamAgent同じ）: gmail.modify(読取+下書き作成/更新/削除+送信(drafts.send)+
+ラベルを1スコープでカバー) / calendar.readonly。送信は実行側で2段人間確認ゲートを通し、
+送信/破壊系を toolset に出さないことで安全を担保（scopeは広いが操作はコードで封じる）。
 """
 from __future__ import annotations
 
@@ -17,9 +18,7 @@ from typing import Any, Optional
 from aiia.auth.token_store import OAuthToken
 
 WORKSPACE_SCOPES: tuple[str, ...] = (
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose",
-    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",  # 読取+下書き(作成/更新/削除)+送信(drafts.send)+ラベル
     "https://www.googleapis.com/auth/calendar.readonly",
 )
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
