@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-IA-UAE 計画サマリー（実装者向け）</title>
+<style>
+  :root{--ink:#1d1c1d;--mut:#5b5b5b;--line:#e6e6e6;--bg:#f6f7f9;--card:#fff;
+        --urgent:#e01e5a;--press:#e8912d;--ok:#2eb67d;--blue:#1264a3;--purple:#3f0e40}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.7}
+  .wrap{max-width:980px;margin:0 auto;padding:24px}
+  header.top{background:var(--purple);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:18px}
+  header.top h1{margin:0 0 6px;font-size:22px}
+  header.top p{margin:0;color:#e6d7e8;font-size:13px}
+  .badges{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:#ffffff22;color:#fff;border:1px solid #ffffff44}
+  .badge.ok{background:var(--ok);border-color:transparent}
+  .badge.work{background:var(--press);border-color:transparent}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:14px 0}
+  h2{font-size:18px;margin:0 0 10px;border-left:5px solid var(--purple);padding-left:10px}
+  .tldr{background:#fff8e6;border:1px solid #f0d999}
+  .safe{background:#eafaf1;border:1px solid #b9e4cf}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .mode{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fafafa}
+  .mode b{display:block;margin-bottom:4px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:6px 0}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f3f3f5}
+  code{background:#f0f0f3;border-radius:4px;padding:1px 5px;font-size:12.5px}
+  pre{background:#0f1117;color:#e6e6e6;border-radius:10px;padding:14px;overflow:auto;font-size:12.5px;line-height:1.5}
+  ol.flow{counter-reset:s;list-style:none;padding-left:0}
+  ol.flow li{counter-increment:s;padding:6px 0 6px 34px;position:relative;border-bottom:1px dashed var(--line)}
+  ol.flow li::before{content:counter(s);position:absolute;left:0;top:6px;width:24px;height:24px;border-radius:50%;
+       background:var(--purple);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;color:#fff;white-space:nowrap}
+  .p1{background:var(--blue)} .p2{background:#8a8a8a}
+  .chk{list-style:none;padding-left:0}
+  .chk li{margin:4px 0}
+  .chk .d::before{content:"\2705\00a0"}
+  .chk .t::before{content:"\2b1c\00a0"}
+  .note{color:var(--mut);font-size:12.5px}
+  .danger{color:var(--urgent);font-weight:700}
+  footer{color:var(--mut);font-size:12px;text-align:center;margin:18px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>AI-IA-UAE &mdash; 計画サマリー（実装者向け）</h1>
+  <p>広告PR会社(NewsTV)向け マルチエージェントAI基盤 ／ 第1弾「朝のメール確認サポートAgent」</p>
+  <div class="badges">
+    <span class="badge ok">AWS Bedrock 接続実証済</span>
+    <span class="badge work">Phase1 実装中</span>
+    <span class="badge">Python 3.11</span>
+    <span class="badge">branch: claude/vibrant-galileo-lXVG6</span>
+    <span class="badge">正典: plans/&hellip;ullman.md §0-50</span>
+  </div>
+</header>
+
+<section class="tldr">
+  <h2>実行者向け TL;DR</h2>
+  <ul>
+    <li><b>作るもの</b>: 毎朝、各営業のGmailとカレンダーを読み「<b>サマリー＋ToDo＋返信下書き＋本日の予定</b>」をSlack DMに出す。人間は<b>意思決定だけ</b>。</li>
+    <li><b>最優先の鉄則</b>: <span class="danger">誤送信ゼロ</span>。メール/Slackの<b>外部宛送信は自動化しない（下書きのみ）</b>。送信は常に人間。</li>
+    <li><b>最短ゴール</b>: <code>python -m aiia.scripts.run_morning_email --dry-run</code> が<b>ネットワーク無で緑</b>（HeuristicLLM＋FakeMCPToolset）→ その後 Bedrock 化。</li>
+    <li><b>Phase1は全同期・YAGNI</b>（§49）。runtime/store は作らない。約900-1000行に圧縮。</li>
+    <li><b>拡張性</b>: 最終形「Slack対話＋RAG＋資料生成(モードA)」へ<b>書き直しゼロ</b>で載るよう Protocol だけ先に凍結。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>1. 全体像（2モード）</h2>
+  <div class="grid">
+    <div class="mode"><b>モードB：朝メール（プロアクティブ・定時）<span class="pill p1">Phase1</span></b>
+      毎朝 各人のGmail＋カレンダーを読み、優先度順ダイジェスト＋下書きをSlack DM。人間は確認/送信のみ。</div>
+    <div class="mode"><b>モードA：対話（オンデマンド）<span class="pill p2">Phase2</span></b>
+      Slackで@メンション/DM→ChatGPTの様に会話。社内ナレッジRAGで回答＋資料/提案書生成。</div>
+  </div>
+  <p class="note">両モードは同一基盤（providers＋MCP＋ナレッジベース＋安全/監査）を共有。出力は自己改善ループに蓄積。</p>
+</section>
+
+<section class="safe">
+  <h2>2. 安全の鉄則（最重要・設計の核）</h2>
+  <ul>
+    <li><b>誤送信を「構造的に」不可能化</b>：<code>MCPToolset</code>型に送信系メソッドを<b>含めない</b>＋<code>NeverSendGate</code>二重防御＋<code>test_safety</code>で機械検証。</li>
+    <li><b>自分宛 vs 他人宛の線引き</b>（=「取り返しがつくか／被害の大きさ」）:</li>
+  </ul>
+  <table>
+    <tr><th>宛先</th><th>例</th><th>扱い</th><th>理由</th></tr>
+    <tr><td>他人(クライアント)</td><td>返信メール</td><td class="danger">自動送信しない（下書き）</td><td>信頼を壊す・取消不可</td></tr>
+    <tr><td>自分</td><td>会議リマインドDM</td><td>自動送信OK</td><td>最悪でも不要通知1回＝可逆</td></tr>
+  </table>
+  <p class="note">機密データは Bedrock(VPC/IAM) 経由。秘密情報はコミットしない。監査はメタデータのみ・本文非保存。</p>
+</section>
+
+<section>
+  <h2>3. アーキテクチャ（層・依存）</h2>
+<pre>[トリガ] cron(EventBridge) / Slack / (将来)OpenClawゲートウェイ
+   |
+[orchestrator] config読込 -&gt; PipelineDeps組立 -&gt; pipeline.run（直起動）
+   |
+[pipeline] 純粋・同期。依存は  LLM  と  MCPToolset  の 2 Protocol だけ
+   |-- LLM  --&gt; providers(factory): HeuristicLLM（既定/ネット不要） / BedrockLLM
+   +-- MCP  --&gt; toolset: gmail(読/ラベル/create_draft) / slack(DM draft) / calendar(予定)
+[横断] safety(NeverSendGate/redaction/audit) / config / (将来)kb・style・store</pre>
+  <p class="note">pipelineが具体実装を知らない＝テストでFake差替・本番でBedrock/実MCPへ無改修で切替可能（これが拡張性の肝）。</p>
+</section>
+
+<section>
+  <h2>4. 朝メール処理フロー</h2>
+  <ol class="flow">
+    <li><b>取得</b>：Gmail未読(<code>is:unread newer_than:1d</code>)＋本日のカレンダー予定。重複排除・既存下書き検出。</li>
+    <li><b>分類（2段）</b>：(1)ヒューリスティック(VIP/緊急語/ドメイン)で確信度≥0.8は即採用 → (2)&lt;0.8のみLLMで確定。7カテゴリ＋優先度。</li>
+    <li><b>要約＋抽出</b>：1-2文要約＋トーン。アクション/締切は<b>原文引用必須</b>（推測しない＝ハルシネーション防止）。</li>
+    <li><b>下書き</b>：緊急/プレス等のみ Gmail <code>create_draft</code>（敬語・<span class="danger">送信しない</span>）。本文はPIIマスク。</li>
+    <li><b>ラベル付け</b>：<code>AIIA/&lt;カテゴリ&gt;</code>。機密はDM限定。</li>
+    <li><b>配信</b>：本日の予定＋優先度順ダイジェストを Slack DM（下書き/プレビュー）。人間が確認。</li>
+  </ol>
+</section>
+
+<section>
+  <h2>5. 主要な設計判断（なぜ）</h2>
+  <table>
+    <tr><th>判断</th><th>理由</th></tr>
+    <tr><td>実行FW=Claude Agent SDK（コアはFW非依存）</td><td>サブAgent/MCPネイティブ＋将来差替可。業界先行のOpt社も Claude+MCP+Skills 構成</td></tr>
+    <tr><td>モデル経路=Bedrock既定＋抽象切替</td><td>機密メールをVPC/IAM内に。1設定で API/Platform へ切替</td></tr>
+    <tr><td>Phase1は全同期</td><td>Fake＋HeuristicLLMでネットI/O無＝asyncは複雑増のみで利得ゼロ</td></tr>
+    <tr><td>JSON強制=tool_use(function calling)</td><td>Bedrock経由で互換が高い。不可ならJSONテキストにフォールバック</td></tr>
+    <tr><td>2段分類</td><td>安価ヒューリスティックで大半を確定→LLMは曖昧分のみ＝コスト最小</td></tr>
+    <tr><td>DI一本化(PipelineDeps)</td><td>SubAgent/AgentContextは型予約のみ＝過剰設計を回避(YAGNI)</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>6. ファイル構成 &amp; 実装順序（最短で緑）</h2>
+<pre>src/aiia/
+|- schemas.py / triage.py / config.py / llm.py(HeuristicLLM) / safety/{hitl,redaction,audit}  …実装済
+|- mcp/{base,registry,fake,harness}     …(1)型契約凍結＋Fake＋送信不可能の機械検証
+|- providers/{base,models,schema_tool,prompts,anthropic_llm,factory}  …(2)抽象＋Bedrock化
+|- pipeline.py                          …(3)取得/分類/要約/抽出/下書き/run
+|- delivery/slack.py                    …(4)BlockKit＋テキスト出力
+|- orchestrator/ + scripts/run_morning_email.py  …(5)直起動CLI(--dry-run既定)
++- agents/base.py(型予約) ほか
+config/*.yaml(3) / tests/(conftest+各test+fixtures) / docs/(ADR)</pre>
+  <p>実装順: <b>(1) mcp → (2) providers → (3) pipeline → (4) delivery → (5) orchestrator/CLI → tests</b>。<br>
+  (5)まで来たら <code>--dry-run</code> が緑（=最初のマイルストーン）。その後 (6) Bedrock実推論 → (7) 実データfixture検証 → コミット/ドラフトPR。</p>
+</section>
+
+<section>
+  <h2>7. 機能ロードマップ</h2>
+  <table>
+    <tr><th>機能</th><th>内容</th><th>フェーズ</th></tr>
+    <tr><td>朝メールダイジェスト</td><td>取得→分類→要約→ToDo→下書き→Slack DM</td><td><span class="pill p1">Phase1</span></td></tr>
+    <tr><td>本日の予定（カレンダー）</td><td>当日予定をダイジェスト先頭に。メールと相互リンク</td><td><span class="pill p1">P1/2</span></td></tr>
+    <tr><td>会議リマインド（案B＝ポーリング）</td><td>1-2分毎ポーリングで <b>会議5分前にDM通知</b>（自分宛=自動送信OK・冪等で二重送信防止）</td><td><span class="pill p2">Phase2</span></td></tr>
+    <tr><td>個人別パーソナライズ</td><td>送信済み＋採用下書きから文体を学習(opt-in)し、その人らしい下書き</td><td><span class="pill p2">Phase2</span></td></tr>
+    <tr><td>モードA：Slack対話＋RAG＋資料生成</td><td>会話で社内ナレッジ引用・提案書生成（VSEO提案書スタイル）</td><td><span class="pill p2">Phase2</span></td></tr>
+    <tr><td>VSEOリサーチ</td><td>TikTok上位動画をAI解析し共通点抽出→提案（Algrow）</td><td><span class="pill p2">Phase2</span></td></tr>
+    <tr><td>自己改善ループ</td><td>全出力＋人手FBを内部KBへ蓄積→次回が引用し複利向上</td><td><span class="pill p2">Phase2</span></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>8. AWS / モデル（接続実証済）</h2>
+  <ul>
+    <li>アカウント <code>718959508629</code>(NewsTV) / リージョン <code>us-east-1</code>。Bedrockで <b>Claude 16モデル利用可</b>を確認。</li>
+    <li>呼び出しは <b>クロスリージョン推論プロファイル</b> <code>us.anthropic.claude-&hellip;-vN:0</code>（on-demand直叩きは不可）。</li>
+    <li>権限は<b>最小（Bedrock呼び出しのみ）</b>が正。インフラ構築時のみ一時的に広い権限→<b>完了後にキー無効化＆最小権限へ戻す</b>。</li>
+    <li>JSON強制/思考パラメータは実装直後に<b>1回スモークテスト</b>で確定（tool_use→不可ならJSONテキスト）。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>9. 現在地と次の一歩</h2>
+  <ul class="chk">
+    <li class="d">設計図 §0-50（要件定義＋ワイヤーフレーム＋業界調査＋レッドチーム検証）</li>
+    <li class="d">共通基盤実装：schemas / triage / config / HeuristicLLM / safety(hitl,redaction,audit)</li>
+    <li class="d">AWS Bedrock 接続実証（認証・モデル一覧・推論プロファイル）</li>
+    <li class="d">infra：最小IAMポリシー / 手順書 / 疎通テスト</li>
+    <li class="t">次：<b>mcp/(base,registry,fake) ＋ tests/test_safety</b>（型契約凍結＋誤送信不可の証明）</li>
+    <li class="t">→ providers(Bedrock) → pipeline → delivery → <code>--dry-run</code> 緑</li>
+  </ul>
+</section>
+
+<section>
+  <h2>10. 完了基準（DoD）/ 検証</h2>
+  <ul>
+    <li><code>ruff</code>/<code>mypy</code> 緑、<code>pytest</code> 全緑（coverage≥80%、network/harnessはomit）</li>
+    <li><code>--dry-run --profile heuristic</code> が<b>副作用ゼロ</b>で完走（Fakeに create_draft/label/送信系の呼出が出ない）</li>
+    <li><code>--profile bedrock</code> で実推論が通る</li>
+    <li>本セッションで実データfixture検証（読取＋下書きのみ・<b>送信は人間</b>）</li>
+    <li>ブランチへコミット/プッシュ → <b>ドラフトPR</b></li>
+  </ul>
+  <p class="note danger">運用注意：チャットに出たアクセスキーは構築後に必ず無効化（ローテーション）し、AdministratorAccessを外す。</p>
+</section>
+
+<footer>AI-IA-UAE Plan Summary ／ 詳細は設計図 plans/shimmying-foraging-ullman.md §0-50 を参照</footer>
+</div>
+</body>
+</html>
