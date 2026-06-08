@@ -5,6 +5,14 @@
 """
 from __future__ import annotations
 
+from aiia.auth.google_creds import build_user_credentials
+from aiia.auth.oauth_flow import (
+    WORKSPACE_SCOPES,
+    OAuthConsentFlow,
+    connect_client_id_secret,
+    make_state,
+    verify_state,
+)
 from aiia.auth.token_store import (
     DynamoDbTokenStore,
     InMemoryTokenStore,
@@ -21,4 +29,10 @@ __all__ = [
     "InMemoryTokenStore",
     "KmsCipher",
     "DynamoDbTokenStore",
+    "OAuthConsentFlow",
+    "WORKSPACE_SCOPES",
+    "make_state",
+    "verify_state",
+    "connect_client_id_secret",
+    "build_user_credentials",
 ]
