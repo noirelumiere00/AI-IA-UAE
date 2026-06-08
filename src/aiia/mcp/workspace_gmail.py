@@ -165,3 +165,50 @@ class WorkspaceGmailToolset:
     @property
     def calls(self) -> list[tuple]:
         return self.slack.calls
+
+
+class WorkspaceGmailSender:
+    """ゲート済み送信/下書き編集 専用（**MCPToolset/GmailTools には含めない**＝pipeline から到達不可）。
+
+    M2 の Slack 2段確認 submit ハンドラからのみ生成し、`SendConfirmationGate.authorize_send` 通過後に
+    `send_draft` を呼ぶ。これにより「ボタン経由・2段確認済み」の送信だけが成立する。
+    """
+
+    def __init__(self, token: OAuthToken, *, service: Any = None) -> None:
+        self._token = token
+        self._service = service
+
+    def _svc(self) -> Any:
+        if self._service is None:
+            from googleapiclient.discovery import build
+
+            self._service = build(
+                "gmail", "v1", credentials=build_user_credentials(self._token), cache_discovery=False
+            )
+        return self._service
+
+    def get_draft(self, draft_id: str) -> dict:
+        return dict(
+            self._svc().users().drafts().get(userId="me", id=draft_id, format="full").execute()
+        )
+
+    def update_draft(self, *, draft_id: str, thread_id: str, subject: str, body: str) -> str:
+        mime = MIMEText(body, _charset="utf-8")
+        mime["Subject"] = subject
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("ascii")
+        resp = (
+            self._svc()
+            .users()
+            .drafts()
+            .update(userId="me", id=draft_id, body={"message": {"threadId": thread_id, "raw": raw}})
+            .execute()
+        )
+        return str(resp.get("id", ""))
+
+    def delete_draft(self, draft_id: str) -> None:
+        self._svc().users().drafts().delete(userId="me", id=draft_id).execute()
+
+    def send_draft(self, draft_id: str) -> str:
+        """既存のGmail下書きを送信（drafts.send）。**呼び出し前にゲート authorize_send 必須**。"""
+        resp = self._svc().users().drafts().send(userId="me", body={"id": draft_id}).execute()
+        return str(resp.get("id", ""))  # 送信後メッセージID
