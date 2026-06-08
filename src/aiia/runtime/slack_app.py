@@ -1,0 +1,202 @@
+"""対話型Slackアプリ（slack_bolt AsyncApp + Socket Mode）。ロジックは slack_handlers に委譲。
+
+ボタン[編集/削除/送信(2段確認)]＋ `/connect`。Gmail呼びは executor で実行(イベントループを塞がない)。
+slack_bolt / slack_sdk は遅延 import（`[multiuser]` extra）。本ファイルは配線のみ＝ロジックは
+slack_handlers.py（テスト済み）と hitl.SendConfirmationGate（テスト済み）に集約。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import uuid
+from typing import Any, Optional
+
+from aiia.auth.oauth_flow import OAuthConsentFlow
+from aiia.auth.token_store import OAuthToken, TokenStore
+from aiia.delivery.slack import ACTION_DELETE, ACTION_EDIT, ACTION_SEND
+from aiia.mcp.workspace_gmail import WorkspaceGmailSender
+from aiia.runtime.slack_handlers import (
+    HandlerDeps,
+    handle_delete,
+    handle_edit_submit,
+    handle_send_submit,
+)
+from aiia.safety.hitl import SendConfirmationGate
+
+EDIT_VIEW = "aiia_edit_submit"
+SEND_VIEW = "aiia_send_submit"
+
+
+def build_handler_deps(
+    store: TokenStore, *, bot_token: Optional[str] = None, gate: Optional[SendConfirmationGate] = None
+) -> HandlerDeps:
+    """本番用 HandlerDeps を構築（email解決は sync WebClient・送信器は本人トークンから）。"""
+    from slack_sdk import WebClient
+
+    wc = WebClient(token=bot_token or os.environ.get("SLACK_BOT_TOKEN"))
+
+    def email_for(slack_user_id: str) -> Optional[str]:
+        resp = wc.users_info(user=slack_user_id)
+        if resp.get("ok"):
+            return resp["user"].get("profile", {}).get("email")
+        return None
+
+    import time
+
+    return HandlerDeps(
+        store=store,
+        gate=gate or SendConfirmationGate(),
+        email_for_slack_user=email_for,
+        sender_factory=lambda t: WorkspaceGmailSender(t),
+        now=time.time,
+        nonce=lambda: uuid.uuid4().hex,
+    )
+
+
+def _edit_modal(draft_id: str, thread_id: str, subject: str, body: str) -> dict:
+    return {
+        "type": "modal",
+        "callback_id": EDIT_VIEW,
+        "private_metadata": json.dumps({"draft_id": draft_id, "thread_id": thread_id, "subject": subject}),
+        "title": {"type": "plain_text", "text": "下書きを編集"},
+        "submit": {"type": "plain_text", "text": "保存"},
+        "close": {"type": "plain_text", "text": "やめる"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "body",
+                "label": {"type": "plain_text", "text": "本文"},
+                "element": {"type": "plain_text_input", "action_id": "v", "multiline": True, "initial_value": body},
+            }
+        ],
+    }
+
+
+def _send_confirm_modal(draft_id: str) -> dict:
+    return {
+        "type": "modal",
+        "callback_id": SEND_VIEW,
+        "private_metadata": json.dumps({"draft_id": draft_id}),
+        "title": {"type": "plain_text", "text": "送信の最終確認 (2/2)"},
+        "submit": {"type": "plain_text", "text": "送信する"},
+        "close": {"type": "plain_text", "text": "やめる"},
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "*この下書きを実際に送信します。* よろしいですか？\n（送信後は取り消せません）"}}
+        ],
+    }
+
+
+def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None) -> Any:
+    from slack_bolt.async_app import AsyncApp
+
+    app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
+    loop = asyncio.get_event_loop
+
+    async def _run(fn: Any) -> Any:  # Gmail等のブロッキングを executor へ
+        return await loop().run_in_executor(None, fn)
+
+    @app.command("/connect")
+    async def connect(ack: Any, body: Any, client: Any, respond: Any) -> None:
+        await ack()
+        info = await client.users_info(user=body["user_id"])
+        email = info["user"].get("profile", {}).get("email")
+        if not email or not connect_redirect_uri:
+            await respond("メール解決に失敗、または連携URL未設定です。")
+            return
+        url, _ = OAuthConsentFlow(connect_redirect_uri).authorization_url(email)
+        await respond(f"👋 *{email}* のGoogleを連携します（1回だけ）。\n下のリンクで許可してください:\n{url}")
+
+    @app.action(ACTION_DELETE)
+    async def on_delete(ack: Any, body: Any, respond: Any) -> None:
+        await ack()
+        draft_id = body["actions"][0]["value"]
+        uid = body["user"]["id"]
+        msg = await _run(lambda: handle_delete(deps, slack_user_id=uid, draft_id=draft_id))
+        await respond(response_type="ephemeral", text=msg)
+
+    @app.action(ACTION_EDIT)
+    async def on_edit(ack: Any, body: Any, client: Any) -> None:
+        await ack()
+        draft_id = body["actions"][0]["value"]
+        cur = await _run(lambda: deps.sender_factory(_tok(deps, body["user"]["id"])).get_draft(draft_id))
+        body_text = _extract_body(cur)
+        await client.views_open(
+            trigger_id=body["trigger_id"],
+            view=_edit_modal(draft_id, _thread_of(cur), _subject_of(cur), body_text),
+        )
+
+    @app.view(EDIT_VIEW)
+    async def on_edit_submit(ack: Any, body: Any, view: Any) -> None:
+        await ack()
+        meta = json.loads(view["private_metadata"])
+        new_body = view["state"]["values"]["body"]["v"]["value"]
+        uid = body["user"]["id"]
+        await _run(lambda: handle_edit_submit(
+            deps, slack_user_id=uid, draft_id=meta["draft_id"],
+            thread_id=meta["thread_id"], subject=meta["subject"], body=new_body,
+        ))
+
+    @app.action(ACTION_SEND)
+    async def on_send(ack: Any, body: Any, client: Any) -> None:
+        await ack()  # 1段目=Block Kit confirm 済 → 2段目モーダルを開く
+        draft_id = body["actions"][0]["value"]
+        await client.views_open(trigger_id=body["trigger_id"], view=_send_confirm_modal(draft_id))
+
+    @app.view(SEND_VIEW)
+    async def on_send_submit(ack: Any, body: Any, view: Any, client: Any) -> None:
+        await ack()
+        draft_id = json.loads(view["private_metadata"])["draft_id"]
+        uid = body["user"]["id"]
+        msg = await _run(lambda: handle_send_submit(deps, slack_user_id=uid, draft_id=draft_id))
+        await client.chat_postMessage(channel=uid, text=msg)
+
+    return app
+
+
+# ── 小ヘルパ（Gmail draft payload からの抽出） ──────────────────────────────
+def _tok(deps: HandlerDeps, slack_user_id: str) -> OAuthToken:
+    email = deps.email_for_slack_user(slack_user_id)
+    token = deps.store.get(email) if email else None
+    if token is None:
+        raise PermissionError("未連携です（/connect）")
+    return token
+
+
+def _headers(draft: dict) -> dict[str, str]:
+    payload = draft.get("message", {}).get("payload", {})
+    return {h.get("name", ""): h.get("value", "") for h in payload.get("headers", [])}
+
+
+def _thread_of(draft: dict) -> str:
+    return str(draft.get("message", {}).get("threadId", ""))
+
+
+def _subject_of(draft: dict) -> str:
+    return _headers(draft).get("Subject", "")
+
+
+def _extract_body(draft: dict) -> str:
+    import base64
+
+    payload = draft.get("message", {}).get("payload", {})
+    parts = payload.get("parts") or [payload]
+    for p in parts:
+        if p.get("mimeType") in (None, "text/plain"):
+            data = p.get("body", {}).get("data")
+            if data:
+                return base64.urlsafe_b64decode(data).decode("utf-8", "replace")
+    return ""
+
+
+def run() -> None:  # pragma: no cover - 常駐起動（live）
+    from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+
+    from aiia.auth.token_store import DynamoDbTokenStore, KmsCipher
+
+    table = os.environ["AIIA_DDB_TABLE"]
+    store = DynamoDbTokenStore(table, KmsCipher(os.environ["OAUTH_KMS_KEY_ID"]))
+    deps = build_handler_deps(store)
+    app = create_app(deps, connect_redirect_uri=os.environ.get("OAUTH_REDIRECT_URI"))
+    handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+    asyncio.run(handler.start_async())

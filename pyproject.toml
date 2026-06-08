@@ -23,6 +23,7 @@ multiuser = [
   "google-auth>=2.0",
   "google-auth-oauthlib>=1.0",
   "slack_sdk>=3.27",
+  "slack_bolt>=1.18",
   "fastapi>=0.110",
   "uvicorn>=0.29",
 ]
