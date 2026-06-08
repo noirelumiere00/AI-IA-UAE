@@ -1,0 +1,53 @@
+{
+  "threads": [
+    {
+      "thread_id": "h1",
+      "subject": "【至急】お見積りのご確認",
+      "labels": ["INBOX"],
+      "messages": [
+        {
+          "message_id": "h1",
+          "sender": "buyer@client.example",
+          "sender_domain": "client.example",
+          "subject": "【至急】お見積りのご確認",
+          "body_text": "お世話になります。本日中にお見積りをご確認いただけますか。",
+          "date": "2026-06-08T07:00:00Z",
+          "headers": {}
+        }
+      ]
+    },
+    {
+      "thread_id": "h2",
+      "subject": "週刊ニュースレター",
+      "labels": ["INBOX"],
+      "messages": [
+        {
+          "message_id": "h2",
+          "sender": "news@news.example",
+          "sender_domain": "news.example",
+          "subject": "週刊ニュースレター",
+          "body_text": "今週の更新情報です。配信停止はこちらから。",
+          "date": "2026-06-08T06:00:00Z",
+          "headers": {"List-Unsubscribe": "<https://news.example/u>"}
+        }
+      ]
+    },
+    {
+      "thread_id": "h3",
+      "subject": "社内のお知らせ",
+      "labels": ["INBOX"],
+      "messages": [
+        {
+          "message_id": "h3",
+          "sender": "hr@acme.example",
+          "sender_domain": "acme.example",
+          "subject": "社内のお知らせ",
+          "body_text": "今週中にご確認をお願いします。",
+          "date": "2026-06-08T05:00:00Z",
+          "headers": {}
+        }
+      ]
+    }
+  ],
+  "existing_draft_thread_ids": ["h3"]
+}
