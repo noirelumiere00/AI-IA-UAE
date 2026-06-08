@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-IA-UAE 設計図（全文）</title>
+<style>
+  :root{--ink:#1d1c1d;--line:#e6e6e6;--bg:#f6f7f9;--card:#fff;--purple:#3f0e40;--blue:#1264a3}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;line-height:1.75}
+  .wrap{max-width:960px;margin:20px auto;padding:28px 24px 80px;background:var(--card);
+        border:1px solid var(--line);border-radius:14px}
+  h1{font-size:25px;border-bottom:3px solid var(--purple);padding-bottom:10px}
+  h2{font-size:20px;margin-top:34px;border-left:6px solid var(--purple);padding-left:12px}
+  h3{font-size:16px;margin-top:22px;color:#333}
+  a{color:var(--blue)}
+  hr{border:0;border-top:1px solid var(--line);margin:26px 0}
+  code{background:#f0f0f3;border-radius:4px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  pre{background:#0f1117;color:#e6e6e6;border-radius:10px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.55}
+  pre code{background:transparent;color:inherit;padding:0}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0;display:block;overflow:auto}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f3f3f5}
+  blockquote{margin:10px 0;padding:8px 14px;background:#fff8e6;border-left:4px solid #f0c75e;color:#5b4b1f}
+  ul,ol{padding-left:22px}
+  li{margin:3px 0}
+  .mermaid{background:#fafafa;border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0;text-align:center}
+  strong{color:#111}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="pr-ai-agent">要件定義書 ＋ ワイヤーフレーム — 広告PR会社向け AI Agent プラットフォーム</h1>
+<h2 id="1agentmorning-email-triage-agent">第1弾「朝のメール確認サポートAgent（Morning Email Triage Agent）」</h2>
+<blockquote>
+<p>版: v1.0 / 対象: 設計図（要件定義・ワイヤーフレーム）/ 実装はこの定義に従って行う<br />
+リポジトリ: AI-IA-UAE（空のグリーンフィールド）/ 開発ブランチ: <code>claude/vibrant-galileo-lXVG6</code><br />
+言語: 日本語（技術用語は英語併記）</p>
+</blockquote>
+<hr />
+<h2 id="0">0. ドキュメントの位置づけ</h2>
+<p>本書は「会社でAI Agentを作る」構想の<strong>メイン設計図</strong>。最終目標は拡張可能なマルチエージェント基盤、第1弾は<br />
+社員の朝メール確認サポート。本書の<strong>機能要件・非機能要件・データモデル・ワイヤーフレーム・受入基準</strong>に従い制作する。<br />
+将来の広告PR機能（リサーチ／クリエイティブ／レポーティング）はサブAgentとして同一基盤に追加する（§24）。</p>
+<hr />
+<h2 id="1">1. 背景・目的・ゴール</h2>
+<ul>
+<li><strong>背景</strong>: 広告PR会社。AWS契約済（Bedrock/Claude利用可）、Claude API利用可、OpenClaw(openclaw.ai)利用可。</li>
+<li><strong>課題</strong>: 社員の朝のメール確認に時間がかかる（重要度判断・要約・返信下書き・整理が手作業）。</li>
+<li><strong>目的</strong>: 朝の受信確認を15–20分→2–3分に短縮し、重要案件の見落としをゼロに近づける。安全（誤送信ゼロ）を最優先。</li>
+<li><strong>成功指標(KPI)</strong>（業界事例§28.4の実測値を反映した具体目標）:</li>
+<li>K1: 朝の確認所要時間 −70%（15–20分→2–3分）／1通あたり作成 約20分→約5分（−75%）</li>
+<li>K2: VIPクライアント/プレス案件の見落とし 0件/週</li>
+<li>K3: 下書き採用率（そのまま/微修正で送信）≥ 50% → 中期「修正なし承認率」70%→90%</li>
+<li>K4: 分類精度（人手ラベル一致）≥ 90%（CLIENT_URGENT/PRESS_MEDIA は Recall ≥ 95%）</li>
+<li>K5: <strong>誤送信・情報漏えい 0件（恒久要件）</strong></li>
+<li>K6: 敬語エラー 月0件（敬語診断スコア ≥ 4.0/5）</li>
+<li>K7: 監査証跡100%（全下書き/承認に改ざん防止ログ・1年保管：AI事業者ガイドライン準拠）</li>
+</ul>
+<hr />
+<h2 id="2">2. スコープ</h2>
+<h3 id="21-1-in">2.1 フェーズ1（本書で制作）= IN</h3>
+<ul>
+<li>共通基盤（プロバイダ抽象 / フレームワーク非依存ランタイムシーム / MCP統合 / 設定 / 監査 / 安全ガード）</li>
+<li>Morning Email Triage Agent 本体（取得→分類→要約→抽出→下書き→ラベル→Slack DM配信）</li>
+<li>Slack DM ダイジェストUI（ワイヤーフレーム＋Block Kit仕様）</li>
+<li>CLI（<code>--dry-run</code> 含む）、ユニットテスト、ドキュメント一式（docs/）、デプロイ手順（infra/README）</li>
+<li>本セッションでの実データ動作検証（読取＋下書きのみ・人間ゲート）</li>
+</ul>
+<h3 id="22-out1">2.2 OUT（フェーズ1ではやらない・設計記載のみ）</h3>
+<ul>
+<li>本番AWSデプロイのIaC実装（手順書のみ）</li>
+<li>OpenClawゲートウェイ実接続（位置づけ・将来 <code>channels/</code> のみ）</li>
+<li>Figma/Algrow/Drive を使う各サブAgentの実装（仕様・ロードマップのみ §24）</li>
+<li>自動送信の自動化（<strong>恒久的に禁止</strong>。常に人間が最終送信）</li>
+<li>Web管理画面/監視ダッシュボードの実装（ワイヤーフレーム §13 WF-7/WF-8 のみ）</li>
+</ul>
+<hr />
+<h2 id="3">3. ペルソナ／ステークホルダー</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>役割</th>
+<th>ニーズ</th>
+<th>関与</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td>アカウント担当（一般社員）</td>
+<td>朝に重要案件を素早く把握、返信下書きが欲しい</td>
+<td>主利用者</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>PRマネージャ</td>
+<td>プレス問い合わせの即応、機密保持</td>
+<td>利用者・要件</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>クリエイティブD</td>
+<td>将来のリサーチ/制作Agent</td>
+<td>将来利用者</td>
+</tr>
+<tr>
+<td>P4</td>
+<td>IT/管理者</td>
+<td>安全（誤送信防止）、監査、コスト、権限</td>
+<td>運用・承認</td>
+</tr>
+<tr>
+<td>P5</td>
+<td>経営</td>
+<td>生産性・ROI</td>
+<td>承認</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4">4. 用語集</h2>
+<ul>
+<li><strong>オーケストレーター</strong>: リクエストを適切なサブAgentへ振り分けるメインAgent（本セッション=Claude Codeと同型）。</li>
+<li><strong>サブAgent</strong>: 特定業務を担う子Agent（第1弾=morning_email）。</li>
+<li><strong>MCP</strong>: Model Context Protocol。外部ツール（Gmail/Slack等）を標準化接続。ツール名は <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>。</li>
+<li><strong>HITL</strong>: Human-in-the-loop。人間が最終確認/承認。</li>
+<li><strong>プロバイダプロファイル</strong>: モデルアクセス経路（bedrock / anthropic_aws / anthropic）。</li>
+<li><strong>下書き(draft)</strong>: 送信せず保存される未送信メール/メッセージ。安全境界の中核。</li>
+</ul>
+<hr />
+<h2 id="5">5. システム全体アーキテクチャ</h2>
+<pre><code>[チャネル/トリガ層] cron(EventBridge Scheduler) / Slackスラッシュ`/morning` / OpenClawゲートウェイ(将来)
+        │ 起動(run morning_email)
+[オーケストレーター] Claude Agent SDK メインAgent（AgentRuntime抽象越し・ルーティング・監査記録）
+        │ 委譲(subagents)
+[サブAgent] morning_email ──► (将来) press_monitor / content_intel / creative_brief ...
+        │ pipeline(純粋関数, LLMClient + MCPToolset の2 Protocol のみ依存)
+[MCP統合層] toolset: Gmail(読/ラベル/create_draft) / Slack(DM draft/send)  ※Drive/Figma/Algrowは将来Agent用
+        │ 推論
+[モデルプロバイダ層] factory: Bedrock(既定/VPC・IAM) / Claude Platform on AWS / 第一者API（データ分類でルーティング）
+[Skills層] Claude Agent Skills: トリアージ規則/カテゴリ判定/日本語メール作法(敬語)/社内承認フロー を外出し・再利用(Opt事例§28.1)
+[横断] config(platform/agent/user) / 安全(NeverSendGate+redaction) / 監査(JSONLメタデータ) / 観測(OTEL/structlog)
+</code></pre>
+<p><strong>設計原則</strong>: ①安全第一（誤送信不可能な構造・humans firmly in control）②拡張性（Agent＝サブパッケージ追加／知見＝Skill追加）<br />
+③テスト可能（DIシーム）④フレームワーク非依存コア（runtime差替可）⑤機密データはVPC内（Bedrock既定）。</p>
+<hr />
+<h2 id="6">6. 確定技術スタック（意思決定・承認済）</h2>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>決定</th>
+<th>根拠</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>言語</td>
+<td>Python 3.11+</td>
+<td>AIエージェントの事実上標準・SDK充実</td>
+</tr>
+<tr>
+<td>実行FW</td>
+<td><strong>Claude Agent SDK</strong>（<code>claude-agent-sdk</code>）</td>
+<td>subagents/MCP/hooks/<code>can_use_tool</code>ゲートをネイティブ。本セッションと同型</td>
+</tr>
+<tr>
+<td>コア結合</td>
+<td><strong>FW非依存</strong>（<code>runtime/</code>アダプタ）</td>
+<td>将来 Strands/AgentCore へ差替可能</td>
+</tr>
+<tr>
+<td>モデル経路</td>
+<td><strong>Bedrock既定</strong>＋抽象切替</td>
+<td>機密メールはVPC/IAM内。<code>AnthropicBedrock</code>/<code>AnthropicAWS</code>/<code>Anthropic</code>を1行切替</td>
+</tr>
+<tr>
+<td>モデル</td>
+<td>opus-4-8(下書き)/sonnet-4-6(要約)/haiku-4-5(分類)（設定可）</td>
+<td>コスト階層化。adaptive thinking＋effort、structured outputs</td>
+</tr>
+<tr>
+<td>配信</td>
+<td><strong>Slack DM</strong>（下書き/プレビュー）</td>
+<td>個人向け・機密性・ボタン操作</td>
+</tr>
+<tr>
+<td>監査/観測</td>
+<td>structlog(JSONL)＋OTEL</td>
+<td>メタデータのみ・本文非保存</td>
+</tr>
+<tr>
+<td>OpenClaw</td>
+<td>将来の<strong>チャネル/ゲートウェイ層</strong></td>
+<td>openclaw.ai=セルフホスト型マルチチャネルAIゲートウェイ(MCP/cron)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>権威事実(claude-apiスキル確認): Bedrockは Managed Agents/サーバーサイドツール/Batch/Files <strong>非対応</strong> →<br />
+本基盤はBedrock上では「Claude API + tool use」構成で動作。最新エージェント機能が必要な場合のみ Claude Platform on AWS / 第一者APIへ切替。<br />
+Bedrockモデルは <code>anthropic.</code> 接頭辞＋<code>-&lt;date&gt;-vN:0</code> 接尾辞・リージョン接頭辞(<code>us.</code>/<code>eu.</code>/<code>global.</code>)あり → <code>providers/models.py</code>に集約し起動時検証。</p>
+</blockquote>
+<hr />
+<h2 id="7-fr-ac">7. 機能要件（FR） ※各に受入基準(AC)</h2>
+<h3 id="71-fetch">7.1 取得（Fetch）</h3>
+<ul>
+<li><strong>FR-01</strong> 既定クエリ <code>is:unread newer_than:1d -category:promotions -category:social</code> でGmail未読スレッドを取得。</li>
+<li>AC: ページング全件取得。<code>thread_id</code>で重複排除。プロモ/ソーシャルは除外。</li>
+<li><strong>FR-02</strong> 既存下書き検出: <code>list_drafts</code>の<code>thread_id</code>集合で <code>has_existing_draft</code> を付与。</li>
+<li>AC: 既に下書きがあるスレッドには新規下書きを作らない（FR-15）。</li>
+<li><strong>FR-03</strong> 取得は<strong>読取のみ</strong>（取得段階で書込みしない）。</li>
+<li><strong>FR-04</strong> OOO(不在)検出: Gmailバケーション応答が有効なら下書き生成を抑止（設定可）。</li>
+</ul>
+<h3 id="72-classify">7.2 分類（Classify）</h3>
+<ul>
+<li><strong>FR-10</strong> 各スレッドを次の排他カテゴリへ分類: <code>CLIENT_URGENT / CLIENT_NORMAL / PRESS_MEDIA / VENDOR_PARTNER / INTERNAL / FINANCE_LEGAL / NEWSLETTER</code>（ルーブリック§11）。</li>
+<li>AC: ヒューリスティック（VIP送信者/ドメイン/緊急語/List-Unsubscribe）＋LLM構造化出力。<code>confidence</code>と<code>reasons</code>を返す。</li>
+<li><strong>FR-11</strong> VIP（<code>vip_senders</code>/<code>vip_domains</code>一致）は <code>is_vip=True</code> とし優先度を底上げ（§11）。</li>
+<li><strong>FR-12</strong> 低信頼（confidence&lt;閾値）は「要確認」フラグを付け、隠さず提示。</li>
+</ul>
+<h3 id="73-summarize-extract">7.3 要約・抽出（Summarize / Extract）</h3>
+<ul>
+<li><strong>FR-20</strong> スレッド毎に1–2文要約＋トーン（neutral/urgent/frustrated/positive/formal）。長文は最新N通＋初回を圧縮。</li>
+<li><strong>FR-21</strong> アクション項目・質問・<strong>明示された締切のみ</strong>抽出。各項目は<strong>原文引用(source_quote)必須</strong>。</li>
+<li>AC: <code>deadline</code>は<code>source_quote</code>に日付/明示相対表現が含まれる場合のみ設定（pydantic検証で構造的に強制）。推測禁止。</li>
+<li><strong>FR-22</strong> 添付はファイル名/種別のみ列挙（自動処理しない）。5MB超は「メディアレビュー候補」フラグ。</li>
+</ul>
+<h3 id="74-draft">7.4 下書き（Draft）</h3>
+<ul>
+<li><strong>FR-15</strong> <code>draft_categories</code>（既定: CLIENT_URGENT, PRESS_MEDIA）かつ未返信・既存下書き無のスレッドに、簡潔・中立な返信を Gmail <code>create_draft</code> で作成。</li>
+<li>AC: <strong>送信は絶対にしない</strong>（下書きのみ）。本文はredaction後に保存。</li>
+<li><strong>FR-16</strong> 下書きには「未送信・要確認」が明確に分かる旨と、必要に応じ慎重さ喚起（履歴ある重要顧客等）。</li>
+</ul>
+<h3 id="75-label">7.5 整理（Label）</h3>
+<ul>
+<li><strong>FR-30</strong> カテゴリ別ラベル <code>AIIA/&lt;CATEGORY&gt;</code> を付与（自動 or 確認、設定可）。<code>confidential</code>ラベル付きは公開チャンネルへ出さずDM限定。</li>
+</ul>
+<h3 id="76-deliver">7.6 配信（Deliver）</h3>
+<ul>
+<li><strong>FR-40</strong> 優先度順 Slack DM ダイジェストを生成し、<strong>まず下書き/プレビュー</strong>として提示（§13 WF-1）。</li>
+<li>AC: 既定は <code>slack_send_message_draft</code>。実送信は人間承認フラグが立つ場合のみ。</li>
+<li><strong>FR-41</strong> ダイジェスト各アイテム: カテゴリ/送信者/1行要約/推奨アクション/締切/下書き有無/Gmailリンク。</li>
+<li><strong>FR-42</strong> 空状態（未読なし）は簡潔メッセージ（§13 WF-2）。大量時はページング/サマリ（WF-3）。</li>
+<li><strong>FR-43</strong> <code>quiet_categories</code> はダイジェスト本体から畳む（件数のみ表示）。</li>
+</ul>
+<h3 id="77">7.7 起動・スケジュール</h3>
+<ul>
+<li><strong>FR-50</strong> cron（既定 平日07:00、ユーザーTZ）で自動起動。Slackスラッシュ <code>/morning</code> で手動起動。</li>
+<li><strong>FR-51</strong> <code>--dry-run</code> で副作用ゼロ（下書き/ラベル/Slack送信なし、ダイジェストをstdout）。</li>
+</ul>
+<h3 id="78">7.8 設定</h3>
+<ul>
+<li><strong>FR-60</strong> ユーザー別設定（VIP/無視カテゴリ/TZ/配信先/下書きモード）を反映（§20）。</li>
+<li><strong>FR-61</strong> プラットフォーム設定でプロバイダ既定・モデル階層を切替（§20）。</li>
+</ul>
+<h3 id="79">7.9 監査</h3>
+<ul>
+<li><strong>FR-70</strong> 全イベントをJSONLで<strong>メタデータのみ</strong>記録（本文/送信者アドレス/下書き本文は保存しない）（§21）。</li>
+</ul>
+<hr />
+<h2 id="8-nfr">8. 非機能要件（NFR）</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>区分</th>
+<th>要件</th>
+<th>受入/目安</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-01</td>
+<td>性能</td>
+<td>50スレッドを ≤ 90秒で処理</td>
+<td>並列度・モデル階層で達成</td>
+</tr>
+<tr>
+<td>NFR-02</td>
+<td>性能</td>
+<td>分類/要約は安価モデル(haiku/sonnet)で実行しコスト最小化</td>
+<td>§配信前にコスト試算ログ</td>
+</tr>
+<tr>
+<td>NFR-03</td>
+<td>可用性</td>
+<td>レート制限/一時障害は指数バックオフ再試行(tenacity)、失敗時は次回再実行とユーザー通知</td>
+<td></td>
+</tr>
+<tr>
+<td>NFR-04</td>
+<td>拡張性</td>
+<td>新Agentは <code>agents/&lt;name&gt;/</code> 追加のみで基盤再利用</td>
+<td>base/AgentContext準拠</td>
+</tr>
+<tr>
+<td>NFR-05</td>
+<td>セキュリティ</td>
+<td>機密メールはBedrock(VPC/IAM)経由。秘密情報はenvのみ・yaml非保存</td>
+<td>§19</td>
+</tr>
+<tr>
+<td>NFR-06</td>
+<td>プライバシー</td>
+<td>PIIマスク（カード/SSN/トークン）。本文は監査非保存</td>
+<td>§19/§21</td>
+</tr>
+<tr>
+<td>NFR-07</td>
+<td>安全</td>
+<td><strong>誤送信不可能</strong>な構造（NeverSendGate＝両経路）</td>
+<td>テストで担保 §22</td>
+</tr>
+<tr>
+<td>NFR-08</td>
+<td>観測性</td>
+<td>OTEL/structlog でトレース・トークン使用量・コスト</td>
+<td>§21</td>
+</tr>
+<tr>
+<td>NFR-09</td>
+<td>保守性</td>
+<td>コアはFW非依存、pipelineは2 Protocolのみ依存、型検査(mypy)/lint(ruff)</td>
+<td>§17</td>
+</tr>
+<tr>
+<td>NFR-10</td>
+<td>国際化</td>
+<td>日/英メール対応。非日英は言語タグ付与＋任意翻訳トグル</td>
+<td></td>
+</tr>
+<tr>
+<td>NFR-11</td>
+<td>コスト</td>
+<td>1ユーザー/日のモデルコスト目安を試算・上限ガード（<code>max_budget_usd</code>）</td>
+<td>§21</td>
+</tr>
+<tr>
+<td>NFR-12</td>
+<td>設定容易性</td>
+<td>非エンジニアがyamlでVIP/配信を変更可能</td>
+<td>docへ手順</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-us">9. ユースケース／ユーザーストーリー（US）</h2>
+<ul>
+<li><strong>US-01</strong>（P1）朝7時、Slack DMに優先度順ダイジェストが届き、最重要から確認できる。</li>
+<li>AC: CLIENT_URGENTが最上段、各アイテムに要約と推奨アクション、下書きは「レビュー」ボタンから開ける。</li>
+<li><strong>US-02</strong>（P1）緊急クライアント/プレスには返信下書きが用意され、Gmailで微修正して自分で送信できる。</li>
+<li>AC: 下書きはGmail下書きフォルダに存在、システムは送信しない。</li>
+<li><strong>US-03</strong>（P2）機密スレッドが公開チャンネルに出ない。DMのみ・<code>confidential</code>尊重。</li>
+<li><strong>US-04</strong>（P1）ニュースレター等は畳まれ件数のみ。必要なら展開できる。</li>
+<li><strong>US-05</strong>（P4）すべての処理がメタデータ監査に残り、誤送信が起きない事を検証できる。</li>
+<li><strong>US-06</strong>（P1）<code>/morning</code> で任意の時刻に再実行できる。</li>
+<li><strong>US-07</strong>（P1）受信ゼロの朝は「静かな朝です」と簡潔に通知される。</li>
+</ul>
+<hr />
+<h2 id="10-pydantic-schemaspy">10. データモデル（pydantic, <code>schemas.py</code>）</h2>
+<pre><code class="language-python">class Category(str, Enum):
+    CLIENT_URGENT; CLIENT_NORMAL; PRESS_MEDIA; VENDOR_PARTNER; INTERNAL; FINANCE_LEGAL; NEWSLETTER
+class EmailMessage(BaseModel): message_id; sender; sender_domain; to:list[str]; subject; date:datetime; snippet; body_text
+class EmailThread(BaseModel): thread_id; subject; messages:list[EmailMessage]; has_existing_draft=False; labels:list[str]=[]
+class ClassificationResult(BaseModel): category:Category; confidence:float(0..1); reasons:list[str]; is_vip=False
+class ActionItem(BaseModel): text; source_quote; kind:Literal[&quot;action&quot;,&quot;question&quot;,&quot;deadline&quot;]; deadline:datetime|None=None
+    # 検証: kind==&quot;deadline&quot; もしくは deadline!=None の時 source_quote 非空必須（推測禁止）
+class ThreadSummary(BaseModel): thread_id; one_liner; tone:Literal[...]; action_items:list[ActionItem]=[]
+class DraftReply(BaseModel): thread_id; subject; body; rationale
+class DigestItem(BaseModel): thread_id; category; priority:int; subject; sender; summary:ThreadSummary; draft:DraftReply|None; gmail_link:str|None
+class Digest(BaseModel): generated_at:datetime; user_id; items:list[DigestItem]; counts_by_category:dict[Category,int]
+class AgentResult(BaseModel): digest:Digest; drafts_created:int; labels_applied:int; redactions:int; cost_usd:float|None
+</code></pre>
+<blockquote>
+<p><code>schemas.py</code> は I/O・SDK import 無し（pipelineの純粋性とテスト容易性を保証）。</p>
+</blockquote>
+<hr />
+<h2 id="11">11. 分類ルーブリック（カテゴリ判定・優先度）</h2>
+<p><strong>判定順（先勝ち＋LLMで最終確定）</strong>:<br />
+1. <code>confidential</code>/法務語＋金融/法務ドメイン → <strong>FINANCE_LEGAL</strong><br />
+2. VIP送信者/ドメイン一致 → <code>is_vip=True</code>。本文に緊急語(ASAP/至急/deadline/緊急/本日中)あれば <strong>CLIENT_URGENT</strong>、無ければ <strong>CLIENT_NORMAL</strong><br />
+3. プレス/媒体ドメイン or 語(取材/interview/掲載/press/記者) → <strong>PRESS_MEDIA</strong><br />
+4. クライアントドメイン（<code>client_domains</code>） → 緊急語有=<strong>CLIENT_URGENT</strong> / 無=<strong>CLIENT_NORMAL</strong><br />
+5. 取引先/パートナー（<code>partner_domains</code>、請求/契約文脈） → <strong>VENDOR_PARTNER</strong><br />
+6. 社内ドメイン → <strong>INTERNAL</strong><br />
+7. <code>List-Unsubscribe</code>ヘッダ/一括配信特徴 → <strong>NEWSLETTER</strong><br />
+8. 上記未該当 → LLMが文脈分類、低信頼は「要確認」</p>
+<p><strong>優先度(priority, 小さいほど上位)</strong>: CLIENT_URGENT(0) &gt; PRESS_MEDIA(10) &gt; FINANCE_LEGAL(20) &gt; CLIENT_NORMAL(30) &gt; VENDOR_PARTNER(40) &gt; INTERNAL(50) &gt; NEWSLETTER(90)。<code>is_vip</code> は priority を −5 補正。<code>quiet_categories</code> は本体から除外し件数のみ。</p>
+<hr />
+<h2 id="12-promptspystructured-outputs">12. プロンプト仕様（<code>prompts.py</code>、structured outputs）</h2>
+<ul>
+<li><strong>CLASSIFY</strong>: system=「広告PR会社のメールトリアージ。与えたカテゴリのいずれか1つに分類し、理由を列挙。ヒューリスティックヒントを尊重しつつ本文で確定。推測の断定を避け不確かなら低confidence」。出力=<code>ClassificationResult</code>(json_schema)。モデル=haiku。</li>
+<li><strong>SUMMARIZE</strong>: system=「1–2文で要点。トーン判定。長文は最新の論点と未決事項を保持」。出力=<code>ThreadSummary</code>。モデル=sonnet。長文は最新N通＋初回に圧縮して投入。</li>
+<li><strong>EXTRACT</strong>: system=「アクション/質問/締切を抽出。<strong>締切は本文に明示された日付/相対表現のみ</strong>。各項目は原文を<code>source_quote</code>に引用。無ければ空配列」。出力=<code>list[ActionItem]</code>。モデル=sonnet。</li>
+<li><strong>DRAFT</strong>: system=「簡潔・中立・<strong>敬体(敬語)</strong>の返信下書き。<strong>宛名(様/御中)・定型挨拶(いつもお世話になっております等)・結び</strong>を含む日本語ビジネスメール作法に準拠。相手が英語なら英語で。約束や数値を捏造しない。未確定は触れない。署名はユーザー名」。出力=本文テキスト→redaction→<code>create_draft</code>。モデル=opus、effort=high。</li>
+<li>※この敬語・メール作法・カテゴリ判定・社内承認フローは <strong>Claude Agent Skill</strong> として外出しし再利用/標準化（Opt事例§28.1に倣う）。</li>
+<li>共通: <code>thinking={"type":"adaptive"}</code>、<code>output_config={"effort":...}</code>、<code>output_config.format</code>（<code>output_format</code>は使わない）。Bedrockは<code>budget_tokens</code>/<code>temperature</code>不可。</li>
+</ul>
+<hr />
+<h2 id="13-ui">13. 画面/UI要件 → ワイヤーフレーム</h2>
+<blockquote>
+<p>配信媒体はSlack（Block Kit）。下記はレイアウトとブロック対応の指示。実装は <code>agents/morning_email/digest.py</code> の <code>render_slack_blocks()</code>。</p>
+</blockquote>
+<h3 id="wf-1-slack-dm">WF-1: Slack DM 朝ダイジェスト（標準）</h3>
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│ 📬  朝のダイジェスト — 6/5(木) 07:15 (Asia/Dubai)              │  header
+│ 9件処理 / 47秒 / 下書き2件 ・ モデル: haiku+sonnet+opus        │  context(小文字グレー)
+├──────────────────────────────────────────────────────────────┤
+│ 🔴 CLIENT_URGENT (1)                                          │  section(太字)
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ John Smith ・ General Motors  ⭐VIP                        │ │  section: sender
+│ │ 件名: Q3クリエイティブのフィードバック（本日締切）         │ │
+│ │ 要約: Q3キャンペーン案へのFBを本日中に希望。添付 brief_v2.pdf│ │
+│ │ 推奨: ブリーフ確認→返信  ⏰ 締切: 本日 17:00                │ │  ← 締切は原文に明示時のみ
+│ │ [📝 下書きをレビュー]  [✓ 確認済]  [⏰ スヌーズ]  [↗ Gmail] │ │  actions(buttons)
+│ └──────────────────────────────────────────────────────────┘ │
+│ 🟠 PRESS_MEDIA (1)                                            │
+│ │ Sarah Chen ・ Tech Weekly                                  │
+│ │ 件名: 取材依頼 — マーケにおけるAI                          │
+│ │ 要約: 特集記事。来週30分の通話を希望。                      │
+│ │ 推奨: 候補日を返信   [📝 下書きをレビュー] [↗ Gmail]        │
+│ 🟡 CLIENT_NORMAL (2)   ［展開 ▸］                              │  ← 折りたたみ(件名のみ)
+│ 🟢 INTERNAL (2)        ［展開 ▸］                              │
+│ ⚪ NEWSLETTER (3) ・ 既読化/アーカイブ [全アーカイブ]          │  ← quiet: 件数のみ
+├──────────────────────────────────────────────────────────────┤
+│ ⏱ 下書き2件は未送信（Gmailで確認後に送信） ・ [⚙ 設定] [⏸ 明日まで停止]│ context+actions
+└──────────────────────────────────────────────────────────────┘
+</code></pre>
+<p>注: 🔴=danger相当の色付き見出し。下書きは<strong>未送信</strong>を明示。Gmailリンクで原本へ。</p>
+<h3 id="wf-2">WF-2: 空状態（未読なし）</h3>
+<pre><code>☕ おはようございます。静かな朝です — 新着の未読メールはありません。
+[次回ダイジェストの時刻を変更]  [手動で再チェック]
+</code></pre>
+<h3 id="wf-3-50">WF-3: 大量受信（&gt;50件）</h3>
+<pre><code>📬 朝のダイジェスト — 124件の未読
+優先度上位50件を表示しています（残り74件）。
+🔴 CLIENT_URGENT(3) / 🟠 PRESS_MEDIA(2) / 🟡 ... 
+[+74件をGmailで見る]   ⚠ 受信が異常に多い場合は設定（クエリ/VIP）を確認
+</code></pre>
+<h3 id="wf-4">WF-4: 下書きレビュー導線（[📝 下書きをレビュー] 押下後）</h3>
+<pre><code>押下 → Gmail下書きを新規タブで開く（Gmailが認証/送信を担当：人間が最終送信）
+Slack側はボタンを「下書き作成済 ✓（Gmailで送信）」に更新。システムは送信しない。
+（任意）押下時にSlackスレッドへ下書き本文プレビューを ephemeral 表示（redaction済）。
+</code></pre>
+<h3 id="wf-5-slack-canvas">WF-5: Slack Canvas 版（任意・リッチ）</h3>
+<pre><code># 朝のダイジェスト 6/5
+## 🔴 今すぐ (1) | ## 🟠 プレス (1) | ## 🟡 通常 (2) | ## 🟢 社内 (2) | ## ⚪ その他 (5)
+- 各項目: チェックボックス(done/snooze) ・ 要約 ・ Gmailリンク ・ 下書きリンク
+（Canvasは閲覧/整理向け。アクションはWF-1のメッセージで実施）
+</code></pre>
+<h3 id="wf-6">WF-6: ボタンインタラクション 状態遷移</h3>
+<pre><code>[下書きをレビュー] → Gmail下書きを開く ＋ ボタン状態「下書き作成済✓」
+[確認済]          → 当該アイテムを淡色化・ラベル `AIIA/Done` 付与（送信なし）
+[スヌーズ]        → 次回ダイジェストへ再掲（snooze_until 設定）
+[Gmail]           → 原本スレッドを開く
+[全アーカイブ]    → NEWSLETTER等をGmailアーカイブ（確認モーダル）
+[設定]            → 設定（将来Web/暫定はyaml編集手順を案内）
+[明日まで停止]    → スケジュール一時停止
+</code></pre>
+<h3 id="wf-7-web">WF-7: 設定（将来Web管理画面・ワイヤー）</h3>
+<pre><code>┌ 設定 ─ ユーザー: example_user ───────────────────────────┐
+│ スケジュール: [07:00] TZ[Asia/Dubai]  平日のみ[✓]         │
+│ 配信先: (●)Slack DM ( )チャンネル ( )自分宛メール ( )Canvas │
+│ 下書きモード: ( )しない (●)緊急/プレスのみ ( )全要返信     │
+│ VIP送信者:  [+追加]  ceo@bigclient.ae  editor@gulfnews.com │
+│ VIPドメイン:[+追加]  bigclient.ae  adnoc.ae               │
+│ 無視カテゴリ: [✓]NEWSLETTER [ ]INTERNAL                    │
+│ 機密保護: PIIマスク[✓]  公開チャンネルへ機密を出さない[✓]   │
+│ プロバイダ: (●)Bedrock(既定) ( )Claude Platform on AWS ( )API│
+│ [保存]  [既定に戻す]                                       │
+└──────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="wf-8">WF-8: 監視ダッシュボード（将来・ワイヤー）</h3>
+<pre><code>┌ AIIA Ops ───────────────────────────────────────────────┐
+│ 本日実行: 1 ・ 処理スレッド: 9 ・ 下書き: 2 ・ 失敗: 0    │
+│ トークン: in 18.2k / out 2.4k ・ 概算コスト: $0.03        │
+│ カテゴリ内訳: ▇▇▇ URGENT3 ▇ PRESS1 ▇▇ NORMAL2 ...        │
+│ 直近イベント(JSONL): run_started / classified / draft_created ... │
+│ アラート: なし（誤送信ガード: 有効）                       │
+└──────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="14-block-kit">14. インタラクション/アクション仕様（Block Kit）</h2>
+<ul>
+<li>各 <code>DigestItem</code> は section + actions ブロック。<code>action_id</code>: <code>review_draft|mark_done|snooze|open_gmail|archive_category|open_settings|pause</code>。</li>
+<li><code>value</code> に <code>thread_id</code>/<code>category</code> をJSON格納。応答は ephemeral 更新。</li>
+<li>ボタン押下のイベントハンドラは Slackアプリ（Socket Mode or Events API）。フェーズ1では「下書きレビュー/Gmailリンク」はURL遷移で実現し、状態更新ボタンは将来のSlackアプリで実装（フェーズ1は表示優先・最小アクション）。</li>
+</ul>
+<hr />
+<h2 id="15">15. 処理フロー（シーケンス）</h2>
+<pre><code>Scheduler/Slack → Orchestrator.run_morning_email(user)
+  Orchestrator → providers.build_llm_client(platform)              # Bedrock既定
+  Orchestrator → MCPToolset(=Sdk/Harness)                          # Gmail+Slack
+  pipeline.fetch_threads():  Gmail.search_threads(query)*ページング → get_thread* → normalize → has_existing_draft
+  for thread:
+     classify: heuristics → llm.structured(ClassificationResult, haiku)
+     summarize: llm.structured(ThreadSummary, sonnet)
+     extract:  llm.structured(list[ActionItem], sonnet)            # 締切=明示のみ
+     if category∈draft_categories and not has_existing_draft:
+         draft = llm.text(opus) → redact → (dry_run? skip : Gmail.create_draft)   # NeverSendGate
+         audit.record(&quot;draft_created&quot;, meta)
+     (dry_run? skip : Gmail.label_thread(&quot;AIIA/&lt;cat&gt;&quot;))
+  digest = assemble_digest(items, user_cfg) → render_slack_blocks
+  (dry_run? print : Slack.send_message_draft(user_id, blocks))     # 既定は下書き/プレビュー
+  audit.record(&quot;digest_delivered&quot;); return AgentResult
+</code></pre>
+<hr />
+<h2 id="16">16. スレッド処理 状態遷移</h2>
+<pre><code>FETCHED → CLASSIFIED → SUMMARIZED → (DRAFTED?) → LABELED → IN_DIGEST → DELIVERED
+   │            │            │            │           │
+   └─dedupe/既存下書き        └─低信頼=NEEDS_REVIEW    └─confidential=DM_ONLY
+失敗時: any → RETRY(backoff) → 失敗継続なら SKIPPED(監査記録, 次回再掲)
+</code></pre>
+<hr />
+<h2 id="17">17. 外部インターフェース仕様（契約）</h2>
+<h3 id="171-llmclient-protocolproviders">17.1 <code>LLMClient</code> Protocol（providers）</h3>
+<pre><code class="language-python">class LLMClient(Protocol):
+    def structured(self,*,model:str,system:str,user:str,schema:type[T],effort:str=&quot;medium&quot;)-&gt;T: ...
+    def text(self,*,model:str,system:str,user:str,effort:str=&quot;medium&quot;)-&gt;str: ...
+</code></pre>
+<ul>
+<li>実装 <code>AnthropicLLMClient</code>: <code>messages.create(model=resolve_model_id(model,profile), thinking={"type":"adaptive"}, output_config={"effort":effort,"format":{...json_schema...}})</code>。</li>
+<li><code>providers/models.py</code>: 論理名↔provider別ID写像（Bedrockは<code>anthropic.</code>接頭辞＋<code>-vN:0</code>＋リージョン接頭辞）。<strong>実装時に正確なID文字列を検証</strong>し本ファイルに集約。</li>
+</ul>
+<h3 id="172-mcptoolset-protocolmcptoolsetpy">17.2 <code>MCPToolset</code> Protocol（mcp/toolset.py）</h3>
+<pre><code class="language-python">class MCPToolset(Protocol):
+    async def gmail_search_threads(query, page_token=None)-&gt;dict
+    async def gmail_get_thread(thread_id)-&gt;dict
+    async def gmail_list_drafts()-&gt;list[dict]
+    async def gmail_create_draft(thread_id, body, subject)-&gt;dict     # 送信不可・下書きのみ
+    async def gmail_label_thread(thread_id, label)-&gt;dict
+    async def slack_send_draft(user_id, blocks)-&gt;dict                # 既定は draft
+</code></pre>
+<ul>
+<li>実装3種: <code>SdkMCPToolset</code>(本番=Agent SDK経由) / <code>HarnessMCPToolset</code>(本セッション=<code>mcp__Gmail__*</code>/<code>mcp__Slack__*</code>直接) / <code>FakeMCPToolset</code>(テスト)。</li>
+<li>ツール名定数（registry）: <code>mcp__Gmail__search_threads</code> 等。<code>allowed_tools</code> で送信系を除外。</li>
+</ul>
+<h3 id="173-agentruntime-protocolruntimebase-claude_agent_sdk_runtime">17.3 <code>AgentRuntime</code> Protocol（runtime/base）＋ <code>claude_agent_sdk_runtime</code></h3>
+<ul>
+<li><code>run_agent(system_prompt, prompt, mcp_servers, allowed_tools, model, can_use_tool, max_turns)-&gt;RuntimeResult</code>。</li>
+<li>SDKアダプタは <code>ClaudeAgentOptions(mcp_servers=..., allowed_tools=..., can_use_tool=NeverSendGate, thinking={"type":"adaptive"}, setting_sources=[], strict_mcp_config=True)</code>。SDK依存はこのファイルに隔離。</li>
+</ul>
+<hr />
+<h2 id="18">18. エラー処理・例外マトリクス</h2>
+<table>
+<thead>
+<tr>
+<th>事象</th>
+<th>検知</th>
+<th>対応</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gmail/Slack レート制限</td>
+<td>429/エラー</td>
+<td>tenacity指数バックオフ(1,2,4,8s)・上限後は次回再実行＋ユーザー通知</td>
+</tr>
+<tr>
+<td>認証失敗</td>
+<td>401/403</td>
+<td>即中断・運用通知（再認証手順）・ダイジェスト未配信を明示</td>
+</tr>
+<tr>
+<td>長文スレッド</td>
+<td>トークン超過</td>
+<td>最新N通＋初回へ圧縮して投入（要約前処理）</td>
+</tr>
+<tr>
+<td>添付大/多</td>
+<td>サイズ/件数</td>
+<td>列挙のみ・5MB超フラグ・自動処理しない</td>
+</tr>
+<tr>
+<td>非日英</td>
+<td>言語判定</td>
+<td>タグ付与＋任意翻訳。要約は原言語要旨＋日本語補足</td>
+</tr>
+<tr>
+<td>構造化出力不正</td>
+<td>スキーマ検証失敗</td>
+<td>1回再試行→失敗時はそのスレッドをNEEDS_REVIEWで生提示（隠さない）</td>
+</tr>
+<tr>
+<td>未読ゼロ</td>
+<td>件数0</td>
+<td>WF-2 空状態</td>
+</tr>
+<tr>
+<td>大量(&gt;200)</td>
+<td>件数閾値</td>
+<td>上位提示＋設定見直し警告（クエリ/VIP）</td>
+</tr>
+<tr>
+<td>Bedrock ID不一致</td>
+<td>InvokeModelエラー</td>
+<td><code>models doctor</code>起動時検証で事前検知・<code>models.py</code>修正</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="19-hitl">19. セキュリティ・プライバシー・HITL（詳細）</h2>
+<ul>
+<li><strong>誤送信不可能(NeverSendGate, 二重防御)</strong>:</li>
+<li>Agent SDK経路: <code>can_use_tool</code> で外部送信ツール（Gmail送信/Slack実送信）を<strong>Deny</strong>、許可は read/<code>create_draft</code>/<code>*_draft</code>/label のみ。</li>
+<li>pipeline経路: <code>delivery</code>/<code>pipeline</code> は <code>*_draft</code>/<code>create_draft</code> のみ呼ぶ。<code>assert_no_send()</code> で送信系到達時に例外。</li>
+<li><strong>PIIマスク(redaction.py)</strong>: カード(Luhn検証)/SSN/AWSキー(<code>AKIA[0-9A-Z]{16}</code>)/Bearer・JWT/<code>(?i)(api[_-]?key|secret|password)\s*[:=]\s*\S+</code> を <code>[REDACTED:&lt;kind&gt;]</code> 置換。適用箇所=下書き本文・ダイジェスト掲載テキスト。</li>
+<li><strong>機密ラベル尊重</strong>: <code>confidential</code> は公開チャンネル禁止・DM限定。</li>
+<li><strong>データ所在</strong>: 機密メールは Bedrock(VPC/IAM)経由（既定）。秘密情報はenvのみ・yaml非保存。</li>
+<li><strong>監査</strong>: メタデータのみ（§21）。本文・送信者アドレス・下書き本文は<strong>保存しない</strong>。</li>
+<li><strong>権限</strong>: IAMは <code>bedrock:InvokeModel*</code> を許可モデルARNに限定。MCPトークンは最小権限。</li>
+<li><strong>キルスイッチ</strong>: 設定でAgent無効化。Googleカレンダー/不在で一時停止（将来）。</li>
+<li><strong>法令準拠（業界調査§28.4）</strong>: 総務省・経産省「<strong>AI事業者ガイドライン</strong>」(2024/4)に従い外部送信は<strong>HITL必須</strong>、「誰が/何を/いつ/どの情報でレビューしたか」を<strong>改ざん防止で記録・1年保管</strong>。<strong>APPI</strong>に従いPIIは外部AIへ渡さない（Bedrock VPC＋redactionで担保）。</li>
+<li><strong>多段階承認＋変更履歴（フェーズ1は最小実装→将来拡張）</strong>: 下書きは「担当者確認→(対外/高額は)部門長確認→人間送信」。AI原案・修正差分・確認者・時刻を監査に追跡（メタデータのみ）。エスカレーション(24h)・委任は将来。</li>
+</ul>
+<hr />
+<h2 id="20">20. 設定仕様（全フィールド）</h2>
+<h3 id="platformyaml">platform.yaml</h3>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>説明</th>
+<th>例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>default_profile</td>
+<td>既定プロバイダ</td>
+<td>bedrock</td>
+</tr>
+<tr>
+<td>profiles.<name>.{name,region,base_url}</td>
+<td>プロファイル定義</td>
+<td>bedrock/region: me-central-1</td>
+</tr>
+<tr>
+<td>models.{classify,summarize,draft}</td>
+<td>論理モデル階層</td>
+<td>haiku/sonnet/opus</td>
+</tr>
+<tr>
+<td>### agents/morning_email.yaml</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>key</td>
+<td>説明</td>
+<td>例</td>
+</tr>
+<tr>
+<td>-----</td>
+<td>------</td>
+<td>----</td>
+</tr>
+<tr>
+<td>schedule.{cron,timezone_from_user}</td>
+<td>起動</td>
+<td><code>0 7 * * 1-5</code></td>
+</tr>
+<tr>
+<td>gmail_query</td>
+<td>取得クエリ</td>
+<td><code>is:unread newer_than:1d -category:promotions -category:social</code></td>
+</tr>
+<tr>
+<td>categories</td>
+<td>使用カテゴリ集合</td>
+<td>7種</td>
+</tr>
+<tr>
+<td>draft_categories</td>
+<td>下書き対象</td>
+<td>[CLIENT_URGENT, PRESS_MEDIA]</td>
+</tr>
+<tr>
+<td>delivery.{channel,mode}</td>
+<td>配信</td>
+<td>slack_dm / draft</td>
+</tr>
+<tr>
+<td>model_overrides</td>
+<td>階層上書き</td>
+<td>{draft: claude-sonnet-4-6}</td>
+</tr>
+<tr>
+<td>### users/<user>.yaml</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>key</td>
+<td>説明</td>
+<td></td>
+</tr>
+<tr>
+<td>-----</td>
+<td>------</td>
+<td></td>
+</tr>
+<tr>
+<td>user_id, timezone, slack_user_id</td>
+<td>基本</td>
+<td></td>
+</tr>
+<tr>
+<td>vip_senders[], vip_domains[]</td>
+<td>VIP</td>
+<td></td>
+</tr>
+<tr>
+<td>quiet_categories[]</td>
+<td>畳むカテゴリ</td>
+<td></td>
+</tr>
+<tr>
+<td>client_domains[], partner_domains[], internal_domain</td>
+<td>分類補助</td>
+<td></td>
+</tr>
+<tr>
+<td>&gt; ローダ: pydantic-settings（env_prefix=<code>AIIA_</code>）。優先順: env &gt; .env &gt; yaml &gt; 既定。秘密はenvのみ。</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="21">21. 監査・観測・メトリクス</h2>
+<ul>
+<li><strong>監査イベント(JSONL)</strong>: <code>run_started/thread_classified/summary_generated/draft_created/label_applied/digest_delivered/tool_denied/run_completed</code>。各行=ts/run_id/user_id/event/thread_id/category/model/in_out_tokens/redactions/tool/draft_id（<strong>本文なし</strong>）。</li>
+<li><strong>メトリクス</strong>: 処理件数・カテゴリ内訳・所要・トークン/コスト・失敗数・誤送信ガード発火数。</li>
+<li><strong>トレース</strong>: OTEL（将来 CloudWatch/Datadog 連携）。</li>
+<li><strong>コストガード</strong>: <code>max_budget_usd</code>／概算コストをrun完了時に記録。</li>
+</ul>
+<hr />
+<h2 id="22">22. テスト要件・受入基準</h2>
+<ul>
+<li><code>tests/conftest.py</code>: <code>FakeLLMClient</code>（thread_id→定型<code>ClassificationResult/ThreadSummary/draft</code>、使用modelを記録）・<code>FakeMCPToolset</code>（fixtureスレッド：長文/既存下書き有/ニュースレター、<code>create_draft/label/slack_send_draft</code>を記録）。</li>
+<li><strong>test_classify</strong>: VIP→is_vip＆優先度底上げ / List-Unsubscribe→NEWSLETTER / 緊急語→CLIENT_URGENT / 分類stepがhaiku使用 を検証。</li>
+<li><strong>test_pipeline</strong>: 2ページのページング重複排除 / 既存下書き有は新規下書きしない / <code>draft_categories</code>のみ下書き / <code>quiet_categories</code>畳み / 優先度順 / <code>--dry-run</code>は副作用ゼロ / Slackは<strong>draft</strong>メソッド / step毎モデル階層（haiku/sonnet/opus）。</li>
+<li><strong>test_redaction</strong>: カード(Luhn)/SSN/AWSキー/api_keyマスク・クリーン文は不変・下書きに原秘密が残らない・<code>find_secrets</code>件数。</li>
+<li><strong>安全テスト</strong>: <code>NeverSendGate</code> が Gmail送信/Slack実送信をDeny、<code>create_draft</code>/<code>*_draft</code>/readを許可。</li>
+<li>すべてネットワーク無・<code>pytest-asyncio</code>。CIで <code>ruff</code>/<code>mypy</code>/<code>pytest</code> green を必須。</li>
+<li><strong>受入(主要)</strong>: KPI K2/K5（見落とし0・誤送信0）を満たすテストが存在し緑。</li>
+</ul>
+<hr />
+<h2 id="23-infrareadme">23. デプロイ・運用（infra/README）</h2>
+<ul>
+<li>Bedrockモデルアクセス有効化＋IAM（<code>bedrock:InvokeModel*</code> を許可モデルARN限定）。</li>
+<li>実行: フェーズ1はローカル/コンテナで cron 起動（<code>python -m aiia.scripts.run_morning_email</code>）。将来 Lambda/ECS + EventBridge Scheduler。</li>
+<li>MCPサーバ: 本番は Gmail/Slack MCP をホスト（env駆動）。本セッションはharness接続済。</li>
+<li>シークレット: Secrets Manager/環境変数。kill switch・一時停止手順を記載。</li>
+</ul>
+<hr />
+<h2 id="24-pragent">24. ロードマップ（広告PR向けサブAgent・優先度順）</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Agent</th>
+<th>トリガ</th>
+<th>主MCP</th>
+<th>出力</th>
+<th>HITL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>morning_email（本書）</td>
+<td>cron/<code>/morning</code></td>
+<td>Gmail,Slack</td>
+<td>Slack DMダイジェスト＋下書き</td>
+<td>送信は人間</td>
+</tr>
+<tr>
+<td>2</td>
+<td>press_monitor</td>
+<td>日次/閾値</td>
+<td>Algrow,Slack</td>
+<td>バイラル/競合アラート＋AI動画解析</td>
+<td>アラート確認</td>
+</tr>
+<tr>
+<td>3</td>
+<td>content_intelligence</td>
+<td>週次/<code>/trends</code></td>
+<td>Algrow,Figma</td>
+<td>トレンドmoodboard＋短尺案</td>
+<td>クリエイティブ承認</td>
+</tr>
+<tr>
+<td>4</td>
+<td>creative_brief→moodboard</td>
+<td>Drive投入</td>
+<td>Drive,Figma,Algrow画像</td>
+<td>Figma moodboard</td>
+<td>デザイナー確認</td>
+</tr>
+<tr>
+<td>5</td>
+<td>campaign_reporter</td>
+<td>日次/週次</td>
+<td>Algrow,Drive,Slack</td>
+<td>成長レポート</td>
+<td>異常確認</td>
+</tr>
+<tr>
+<td>6</td>
+<td>press_release_drafting</td>
+<td><code>/draft-pr</code></td>
+<td>Drive,Gmail下書き</td>
+<td>リリース下書き</td>
+<td>PR確認</td>
+</tr>
+<tr>
+<td>7</td>
+<td>social_ideation</td>
+<td>週次/<code>/ideate</code></td>
+<td>Algrow(TTS/画像/動画)</td>
+<td>短尺台本＋素材案</td>
+<td>コンテンツ確認</td>
+</tr>
+<tr>
+<td>8</td>
+<td>meeting_summarizer</td>
+<td>スレッド/会議後</td>
+<td>Slack,Drive</td>
+<td>決定/AI/締切のCanvas</td>
+<td>ピン確認</td>
+</tr>
+<tr>
+<td>9</td>
+<td>new_business_research</td>
+<td><code>/research</code></td>
+<td>Drive,Gmail,Web</td>
+<td>プロスペクト調査</td>
+<td>BD確認</td>
+</tr>
+<tr>
+<td>10</td>
+<td>client_update</td>
+<td>Drive投入/週次</td>
+<td>Algrow,Gmail下書き</td>
+<td>クライアント更新メール下書き</td>
+<td>アカウント確認</td>
+</tr>
+<tr>
+<td>&gt; 全Agent共通: HITL・監査・kill switch・レート制御・プロバイダ抽象を継承。OpenClawは将来「任意チャットアプリ前段」<code>channels/</code>。</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="25">25. リスク・前提・制約（実装時に確認）</h2>
+<ul>
+<li><strong>BedrockモデルID</strong>（<code>anthropic.&lt;model&gt;-&lt;date&gt;-vN:0</code>＋<code>us./eu./global.</code>）→ <code>models.py</code>集約＋起動時 <code>models doctor</code>。</li>
+<li><strong><code>output_config.format</code></strong> の応答形（<code>.parsed</code>/<code>structured_output</code> か JSONテキスト）→ <code>_extract_json</code> 局所化。</li>
+<li><strong><code>AnthropicAWS</code></strong> 未提供の可能性 → import ガードし既定 <code>bedrock</code> フォールバック。</li>
+<li><strong>Claude Agent SDK</strong> は内部CLIランタイム要求 → 本番cronホストに必要（マネージドセッションは提供済）。</li>
+<li>前提: Gmail/Slack MCPは認証済で接続可能。VIP/ドメイン等の初期設定は管理者が投入。</li>
+</ul>
+<hr />
+<h2 id="26-definition-of-done">26. Definition of Done（受入チェックリスト）</h2>
+<ul>
+<li>[ ] docs/ 一式（00–06＋本要件＝05に反映）／ADR 2件</li>
+<li>[ ] src/aiia 雛形（providers/runtime/mcp/orchestrator/agents/safety/delivery/config/schemas）</li>
+<li>[ ] morning_email 実装（fetch/classify/summarize/extract/draft/label/digest/deliver）</li>
+<li>[ ] NeverSendGate（両経路）＋redaction＋metadata監査</li>
+<li>[ ] config 3種＋.env.example＋pyproject(src-layout/hatchling)</li>
+<li>[ ] tests（classify/pipeline/redaction/conftest）green、ruff/mypy 緑</li>
+<li>[ ] <code>--dry-run</code> で副作用ゼロ動作</li>
+<li>[ ] 本セッション実データ検証（読取＋<code>create_draft</code>＋Slack下書き、人間ゲート）レポート</li>
+<li>[ ] ブランチ <code>claude/vibrant-galileo-lXVG6</code> にコミット＆プッシュ、<strong>ドラフトPR</strong>作成</li>
+<li>[ ] KPIテスト（誤送信0・見落とし0の構造）担保</li>
+</ul>
+<hr />
+<h2 id="27">27. 未決事項・確認したい点（任意・既定で進行可）</h2>
+<ol>
+<li>VIP送信者/ドメイン・社内/クライアント/取引先ドメインの初期値（無ければサンプルで雛形化）。</li>
+<li>タイムゾーン/起動時刻（既定: Asia/Dubai 07:00 平日）。</li>
+<li>下書きの言語既定（日本語/英語/相手言語に合わせる）。</li>
+<li>フェーズ1で Slackの状態更新ボタンまで作るか（既定: 表示＋URL遷移を優先、状態更新ボタンは将来）。</li>
+</ol>
+<hr />
+<h2 id="28-ai-agent">28. 業界ベンチマーク（日本の広告会社の実装可能AI Agent事例・調査反映）</h2>
+<blockquote>
+<p>出典付き。当社設計の妥当性確認と機能優先度に反映。</p>
+</blockquote>
+<h3 id="281-optopt-ad-agent20265">28.1 株式会社Opt「OPT Ad Agent」(2026/5) ★当社設計と同型＝最重要参照</h3>
+<ul>
+<li><strong>Claude（Anthropic）中核</strong>の広告運用プラットフォーム。運用トップ知見を<strong>Claude「Agent Skills」</strong>として体系化し全担当者が利用。</li>
+<li>独自<strong>MCP（Model Context Protocol）</strong>接続基盤で Google/Meta/LINEヤフー/TikTok を直結。</li>
+<li>AIエージェントが24時間自律で<strong>データ取得/集計/レポート作成/異常値検知/入稿ファイル生成/バナー構成案</strong>を分断なく遂行。並列処理でPDCA数週間→大幅短縮。</li>
+<li>「CRAIS+」=個社特化マーケAIエージェント構築（縦型動画CPA−51%、制作費削減）。Digital Holdingsグループ。</li>
+<li>含意: <strong>Bedrock/Claude ＋ Claude Agent SDK ＋ MCP ＋ Agent Skills</strong> という当社方針は業界先行事例と一致。</li>
+<li>出典: opt.ne.jp/news/12421, andsmart.net/post/opt-claude-ai-agent-advertising, opt.ne.jp/news/11455</li>
+</ul>
+<h3 id="282-aidentsuconnectai-for-growth">28.2 電通／電通デジタル「∞AI」「dentsu.Connect」「AI For Growth」</h3>
+<ul>
+<li>∞AI に<strong>AIエージェント技術</strong>導入(能動的にタスク実行)。∞AI Ads2=<strong>対話形式でバナー生成</strong>。メディア選定・予算配分を<strong>対話で高速化</strong>。</li>
+<li>「AI For Growth Canvas」(2026/4)に<strong>10種の専門マーケAIエージェント</strong>内蔵。「AI For Growth 3.0」(2026/5)=実装フェーズ・PSDCA。</li>
+<li>dentsu.Connect=agentic AIマーケOS、<strong>humans firmly in control（HITL）</strong>。Generative Audiences=AIオーディエンス知能。</li>
+<li>電通総研: 生成AIで<strong>上流工程(要件定義/基本設計)を半自動化、30%生産性向上</strong>。</li>
+<li>出典: dentsudigital.co.jp/news/release/services/2025-0324-000211, .../2025-0730-000242, dentsu.com(dentsu.Connect), dentsu-ho.com/en/articles/9757, dentsusoken.com/news/release/2025/1009.html</li>
+</ul>
+<h3 id="283-dy">28.3 博報堂／博報堂DY</h3>
+<ul>
+<li>博報堂プロダクツ「AI Craft Studio」(2025/10)=AI専門職<strong>「ジェネレーター」新設</strong>、高品質・効率・<strong>安全性</strong>。HCAI(2024/4)。</li>
+<li>「CREATIVITY ENGINE BLOOM」=<strong>AIエージェント組込</strong>の統合マーケ5モジュール。「バーチャル生活者」=生成AIで<strong>仮想消費者と対話</strong>しインサイト探索。</li>
+<li>出典: h-products.co.jp/topics/entry/n/2025/10/28/140000, special.nikkeibp.co.jp/atclh/ONB/25/hakuhodody_holdings0620, hakuhodo.co.jp/magazine/109283</li>
+</ul>
+<h3 id="284-pr">28.4 業界横断の実装可能事例（メール/PR/レポート/議事録/承認）と日本特有の留意点</h3>
+<table>
+<thead>
+<tr>
+<th>分野</th>
+<th>代表例</th>
+<th>実装可能パターン</th>
+<th>出典</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>メール対応</td>
+<td>ラクス メールディーラー / Onebox yaritori(GPT-4o)</td>
+<td>受信→分類→要約→敬語下書き→<strong>人手確認</strong>→送信。定型(納期/見積)に特に有効、精度は2–3ヶ月で向上</td>
+<td>rakus.co.jp/news/2025/0710_3, prtimes(yaritori)</td>
+</tr>
+<tr>
+<td>レポート</td>
+<td>JAPAN AI MARKETING / CyberAgent</td>
+<td>CSV→抽出→グラフ→考察→PPT、数日→<strong>3分</strong>／1–2日→2分</td>
+<td>japan-ai.co.jp/news/press/2025/05/250501</td>
+</tr>
+<tr>
+<td>プレスリリース</td>
+<td>広報AI / PressNavi(複数AI添削)</td>
+<td>情報→雛形→複数AI添削→人手→配信。作業<strong>−50%</strong>、掲載率<strong>+30%</strong></td>
+<td>gaaaon.jp/blog/pr-generative-ai-trends2025</td>
+</tr>
+<tr>
+<td>メディアモニタ</td>
+<td>PR Analyzer</td>
+<td>キーワード→日次クリッピング→感情分析(信頼/共感/疑念)→月次レポート自動</td>
+<td>prtimes(PR Analyzer)</td>
+</tr>
+<tr>
+<td>議事録/要約</td>
+<td>Slack AI</td>
+<td>チャンネル/ハドル要約・問い合わせ自動振り分け(日本語対応)</td>
+<td>slack.com/help/articles/31377193680019</td>
+</tr>
+<tr>
+<td>承認</td>
+<td>HumanLayer / Salesforce Agentforce</td>
+<td>非同期承認(Slackで1タップ)・委任/エスカレーション・CRM照合</td>
+<td>finchjapan.co.jp/technology/8131</td>
+</tr>
+</tbody>
+</table>
+<p><strong>日本特有の留意点（HITL・敬語・セキュリティ）</strong>:<br />
+- <strong>法令</strong>: 総務省・経産省「<strong>AI事業者ガイドライン</strong>」(2024/4)=外部アクション前に<strong>Human-in-the-Loop必須</strong>、「誰が/何を/いつ/どの情報でレビューしたか」の<strong>改ざん防止記録</strong>。<strong>APPI(個人情報保護法)</strong>=外部AIへPII入力禁止・契約/社内LLM・DLP。<br />
+- <strong>敬語</strong>: 相手/部門別の敬語レベル(1–5)、定型化、社内用語辞書。日本語敬語は<strong>Claudeが高評価</strong>。<br />
+- <strong>失敗回避</strong>: 否定表現の誤分類／ブランドボイス喪失／誇大表現(「業界唯一」等)／守秘情報のモデル混入／ハルシネーション→重要決定は人手必須。<br />
+- 出典: meti.go.jp(AI事業者ガイドライン), ipa.go.jp/digital/kaihatsu/sds-column/ai-agent, note.com/timakin(Human-in-the-Loop)</p>
+<h2 id="29">29. ベンチマークからの設計強化（本要件に反映）</h2>
+<ol>
+<li><strong>Claude Agent Skills の採用（Opt流）</strong>: 「トリアージ規則／カテゴリ判定基準／<strong>日本語ビジネスメール下書き(敬語・宛名・定型挨拶)</strong>／社内承認フロー」を再利用可能な<strong>Skill</strong>として体系化（§5アーキテクチャに「Skills層」を追加、§12 DRAFTに敬語規範を反映）。非エンジニアでも知見を更新・標準化可能。</li>
+<li><strong>HITL「humans firmly in control」を中核明記</strong>（電通/博報堂と同様、<strong>安全性重視</strong>）。当社 NeverSendGate＝業界標準の体現。</li>
+<li><strong>日本語ビジネスメール対応強化（FR-16改訂）</strong>: 敬語・宛名・季節/定型挨拶・社内承認導線をプロンプト/Skillに明示。相手言語に合わせた敬体生成。</li>
+<li><strong>ロードマップ再優先度</strong>: Optが実証した <strong>campaign_reporter（取得/集計/レポート/異常検知）</strong> と「<strong>対話型メディアプランニング/予算配分</strong>」を上位化。morning/reporter に<strong>異常検知</strong>観点を追加検討。</li>
+<li><strong>新Agent候補追加</strong>: 「<strong>バーチャル生活者/オーディエンス・シミュレーション</strong>」（博報堂・電通Generative Audiences）をリサーチ系ロードマップに追加（Algrow＋ペルソナで創作前検証）。</li>
+<li><strong>MCPメディアコネクタ（Opt流）</strong>: 将来 Algrow＋広告媒体(Google/Meta/TikTok/LINEヤフー)を<strong>MCPで直結</strong>するレポーティング基盤を視野（§24拡張）。</li>
+<li><strong>上流半自動化の知見</strong>（電通総研30%）はメタ知見として記録（将来「社内開発/提案支援Agent」候補）。</li>
+<li><strong>多層分類化（業界横断知見）</strong>: 単一カテゴリに加え直交属性を付与=優先度(緊急/高/中/低)・取扱い(定型/非定型)・<strong>金額規模</strong>(例:100万以上)・<strong>関係者</strong>(課長/CFO等)を件名/本文から自動検出 → 「<strong>本日の対応優先度TOP5</strong>」を自動提示（§10 schemasに属性追加、§11拡張）。</li>
+<li><strong>敬語の高度化（Skill化）</strong>: 相手/部門別の<strong>敬語レベル(1–5)</strong>設定・<strong>敬語診断スコア</strong>表示・<strong>社内用語辞書/禁則(誇大表現NG)</strong>を Agent Skill として外出し。日本語敬語はClaudeの強み。</li>
+<li><strong>多段階承認フロー＋変更履歴（HITL強化）</strong>: AI原案→担当者(修正/承認/却下)→<strong>部門長確認(対外/高額は必須)</strong>→送信(確認者署名)→<strong>監査ログ1年保管</strong>。AI原案・修正差分・確認者・時刻を追跡。エスカレーション(24h)・委任。Slackボタン承認(HumanLayer型・将来)。</li>
+<li><strong>法令準拠の明記（§19反映）</strong>: AI事業者ガイドライン(HITL必須・改ざん防止監査)＋APPI(PII遮蔽/DLP)。当社=Bedrock(VPC/IAM)＋redaction＋メタデータ監査でカバー。</li>
+<li><strong>ロードマップを効果×難度で再整理（Phase1–4/18ヶ月、§24反映）</strong>: P1(最優先)=morning_email/campaign_reporter/meeting_summarizer、P2=press_release/press_monitor/social_research、P3=creative_brief/new_business、P4=動画自動生成/媒体最適化。</li>
+<li><strong>失敗モードを受入/テストへ（§22反映）</strong>: 否定表現の誤分類・ハルシネーション締切・敬語不自然・PII混入・誇大表現 をテスト観点に追加。</li>
+</ol>
+<h2 id="30-promptspy">30. プロンプト全文（実装そのまま使用可・<code>prompts.py</code>）</h2>
+<blockquote>
+<p>structured outputs（<code>output_config.format</code>=json_schema）。Bedrock既定。temperature/budget_tokens不可、<code>thinking={"type":"adaptive"}</code>。</p>
+</blockquote>
+<h3 id="301-classify-haiku">30.1 CLASSIFY（モデル: haiku）</h3>
+<pre><code>あなたは日本の広告PR会社のメールトリアージAIです。1スレッドを次のいずれか1つに分類します:
+CLIENT_URGENT / CLIENT_NORMAL / PRESS_MEDIA / VENDOR_PARTNER / INTERNAL / FINANCE_LEGAL / NEWSLETTER。
+判定規則: ①機密/法務語+金融法務ドメイン→FINANCE_LEGAL ②VIP一致→緊急語(至急/本日中/ASAP/deadline)有=CLIENT_URGENT,無=CLIENT_NORMAL
+③媒体/取材語→PRESS_MEDIA ④クライアントドメイン→緊急語で URGENT/NORMAL ⑤取引先/請求/契約→VENDOR_PARTNER ⑥社内ドメイン→INTERNAL
+⑦List-Unsubscribe/一括配信→NEWSLETTER。さらに直交属性として priority(緊急/高/中/低)・handling(定型/非定型)・amount_jpy(本文に明示時のみ)・key_person(役職/氏名)を抽出。
+重要: 推測で断定しない。不確かなら confidence を下げる。否定表現(&quot;〜ではない&quot;)を肯定と誤判定しない。出力はスキーマJSONのみ。
+</code></pre>
+<p>出力スキーマ: <code>ClassificationResult{category, confidence, reasons[], is_vip, priority, handling, amount_jpy?, key_person?}</code></p>
+<h3 id="302-summarize-sonnet">30.2 SUMMARIZE（モデル: sonnet）</h3>
+<pre><code>スレッドを日本語で1〜2文に要約し、トーン(neutral/urgent/frustrated/positive/formal)を判定します。
+長文は最新の論点と未決事項を優先。事実のみ。誇張・推測を加えない。出力はスキーマJSONのみ。
+</code></pre>
+<p>出力: <code>ThreadSummary{thread_id, one_liner, tone, action_items[]}</code></p>
+<h3 id="303-extract-sonnet">30.3 EXTRACT（モデル: sonnet）</h3>
+<pre><code>スレッドからアクション項目/質問/締切を抽出します。各項目に原文を source_quote として必ず引用。
+締切(deadline)は本文に日付か明示的相対表現(本日中/今週金曜まで等)がある場合のみ設定し、無ければ設定しない(推測禁止)。
+該当なしは空配列。出力はスキーマJSONのみ。
+</code></pre>
+<p>出力: <code>list[ActionItem{text, source_quote, kind, deadline?}]</code></p>
+<h3 id="304-draft-opus-efforthigh">30.4 DRAFT（モデル: opus, effort=high）</h3>
+<pre><code>あなたはユーザー本人の代理で、日本語ビジネスメールの返信「下書き」を作成します(送信はしない)。
+作法: 宛名(社名+氏名+様/御中)→冒頭挨拶(いつもお世話になっております 等)→用件(簡潔・敬体/敬語)→結び(よろしくお願いいたします)→署名(ユーザー名)。
+敬語レベルは関係性(取引先/社内/上司)に合わせる(§39)。相手が英語なら英語で。
+禁止: 約束/数値/期日の捏造、未確定事項への言及、誇大表現(「業界唯一」等)。不明点は触れず、確認を促す中立文に留める。
+出力は本文テキストのみ(件名は元スレッド踏襲)。
+</code></pre>
+<h2 id="31-json">31. データ例（サンプルJSON）</h2>
+<pre><code class="language-json">// ClassificationResult
+{&quot;category&quot;:&quot;CLIENT_URGENT&quot;,&quot;confidence&quot;:0.93,&quot;reasons&quot;:[&quot;VIPドメイン bigclient.ae&quot;,&quot;本文に『本日中』&quot;],&quot;is_vip&quot;:true,&quot;priority&quot;:&quot;緊急&quot;,&quot;handling&quot;:&quot;非定型&quot;,&quot;amount_jpy&quot;:null,&quot;key_person&quot;:&quot;先方 部長&quot;}
+// ThreadSummary
+{&quot;thread_id&quot;:&quot;t_abc&quot;,&quot;one_liner&quot;:&quot;Q3キャンペーン案へのフィードバックを本日中に希望。添付に修正版ブリーフ。&quot;,&quot;tone&quot;:&quot;urgent&quot;,&quot;action_items&quot;:[{&quot;text&quot;:&quot;ブリーフを確認し返信&quot;,&quot;source_quote&quot;:&quot;本日中にご確認いただけますか&quot;,&quot;kind&quot;:&quot;deadline&quot;,&quot;deadline&quot;:&quot;2026-06-05T17:00:00+04:00&quot;}]}
+// 監査JSONL(1行=1イベント, 本文なし)
+{&quot;ts&quot;:&quot;2026-06-05T03:00:01Z&quot;,&quot;run_id&quot;:&quot;r-9f&quot;,&quot;user_id&quot;:&quot;example_user&quot;,&quot;event&quot;:&quot;draft_created&quot;,&quot;thread_id&quot;:&quot;t_abc&quot;,&quot;category&quot;:&quot;CLIENT_URGENT&quot;,&quot;model&quot;:&quot;claude-opus-4-8&quot;,&quot;input_tokens&quot;:1820,&quot;output_tokens&quot;:240,&quot;redactions&quot;:1,&quot;tool&quot;:&quot;mcp__Gmail__create_draft&quot;,&quot;draft_id&quot;:&quot;d_123&quot;}
+</code></pre>
+<h2 id="32-slack-block-kit-wf-1">32. Slack Block Kit ペイロード（WF-1 抜粋・コピペ可）</h2>
+<pre><code class="language-json">{&quot;channel&quot;:&quot;&lt;SLACK_USER_ID&gt;&quot;,&quot;blocks&quot;:[
+ {&quot;type&quot;:&quot;header&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;plain_text&quot;,&quot;text&quot;:&quot;📬 朝のダイジェスト — 6/5(木) 07:15&quot;}},
+ {&quot;type&quot;:&quot;context&quot;,&quot;elements&quot;:[{&quot;type&quot;:&quot;mrkdwn&quot;,&quot;text&quot;:&quot;9件処理 / 47秒 / 下書き2件 ・ 未送信(Gmailで確認後に送信)&quot;}]},
+ {&quot;type&quot;:&quot;section&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;mrkdwn&quot;,&quot;text&quot;:&quot;*🔴 CLIENT_URGENT (1)*&quot;}},
+ {&quot;type&quot;:&quot;section&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;mrkdwn&quot;,&quot;text&quot;:&quot;*John Smith ・ General Motors* ⭐VIP\n件名: Q3クリエイティブのフィードバック（本日締切）\n要約: Q3案へのFBを本日中に希望。添付 brief_v2.pdf\n推奨: ブリーフ確認→返信  ⏰ 本日 17:00&quot;}},
+ {&quot;type&quot;:&quot;actions&quot;,&quot;elements&quot;:[
+   {&quot;type&quot;:&quot;button&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;plain_text&quot;,&quot;text&quot;:&quot;📝 下書きをレビュー&quot;},&quot;url&quot;:&quot;https://mail.google.com/mail/u/0/#drafts&quot;,&quot;action_id&quot;:&quot;review_draft&quot;,&quot;value&quot;:&quot;{\&quot;thread_id\&quot;:\&quot;t_abc\&quot;}&quot;},
+   {&quot;type&quot;:&quot;button&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;plain_text&quot;,&quot;text&quot;:&quot;↗ Gmail&quot;},&quot;url&quot;:&quot;https://mail.google.com/mail/u/0/#inbox/t_abc&quot;,&quot;action_id&quot;:&quot;open_gmail&quot;}]},
+ {&quot;type&quot;:&quot;divider&quot;},
+ {&quot;type&quot;:&quot;section&quot;,&quot;text&quot;:{&quot;type&quot;:&quot;mrkdwn&quot;,&quot;text&quot;:&quot;🟢 INTERNAL (2) ・ ⚪ NEWSLETTER (3) は折りたたみ&quot;}},
+ {&quot;type&quot;:&quot;context&quot;,&quot;elements&quot;:[{&quot;type&quot;:&quot;mrkdwn&quot;,&quot;text&quot;:&quot;⏱ 下書きは未送信。 ⚙ 設定 / ⏸ 明日まで停止&quot;}]}
+]}
+</code></pre>
+<h2 id="33-mermaid">33. 図（Mermaid・レンダリング可）</h2>
+<pre><code class="language-mermaid">flowchart TD
+  T[cron / Slack /morning / OpenClaw将来] --&gt; O[Orchestrator(Claude Agent SDK)]
+  O --&gt; P[pipeline(純粋関数)]
+  P --&gt;|LLMClient| PR[providers: Bedrock既定/AWS/API]
+  P --&gt;|MCPToolset| M[Gmail / Slack]
+  P --&gt; SK[Skills: 敬語/分類/承認]
+  P --&gt; SF[safety: NeverSendGate/redaction] --&gt; A[(監査JSONL)]
+  P --&gt; D[Slack DM ダイジェスト(下書き)]
+</code></pre>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as cron/Slack
+  participant Pi as pipeline
+  participant G as Gmail(MCP)
+  participant L as LLM(Bedrock)
+  participant S as Slack(MCP)
+  C-&gt;&gt;Pi: run(user)
+  Pi-&gt;&gt;G: search_threads / get_thread (読取)
+  loop 各スレッド
+    Pi-&gt;&gt;L: classify(haiku)/summarize+extract(sonnet)
+    alt 要返信&amp;未下書き
+      Pi-&gt;&gt;L: draft(opus)
+      Pi-&gt;&gt;G: create_draft (下書きのみ)
+    end
+    Pi-&gt;&gt;G: label_thread
+  end
+  Pi-&gt;&gt;S: send_message_draft(digest)  %% 送信は人間
+</code></pre>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; FETCHED
+  FETCHED --&gt; CLASSIFIED
+  CLASSIFIED --&gt; SUMMARIZED
+  SUMMARIZED --&gt; DRAFTED: 要返信
+  SUMMARIZED --&gt; LABELED: 不要
+  DRAFTED --&gt; LABELED
+  LABELED --&gt; IN_DIGEST --&gt; DELIVERED --&gt; [*]
+  CLASSIFIED --&gt; NEEDS_REVIEW: 低信頼
+  FETCHED --&gt; SKIPPED: 失敗(再試行後)
+</code></pre>
+<h2 id="34-eval">34. 分類評価セット（eval / 回帰テスト・抜粋）</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>送信者/ドメイン</th>
+<th>件名/要旨</th>
+<th>期待カテゴリ</th>
+<th>根拠</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>ceo@bigclient.ae(VIP)</td>
+<td>「本日中にご確認を」</td>
+<td>CLIENT_URGENT</td>
+<td>VIP＋緊急語</td>
+</tr>
+<tr>
+<td>2</td>
+<td>pr@gulfnews.com</td>
+<td>取材依頼・来週通話</td>
+<td>PRESS_MEDIA</td>
+<td>媒体＋取材</td>
+</tr>
+<tr>
+<td>3</td>
+<td>billing@vendor.com</td>
+<td>請求書送付</td>
+<td>VENDOR_PARTNER</td>
+<td>請求文脈</td>
+</tr>
+<tr>
+<td>4</td>
+<td>hr@agency.ae(社内)</td>
+<td>経費承認のお願い</td>
+<td>INTERNAL</td>
+<td>社内ドメイン</td>
+</tr>
+<tr>
+<td>5</td>
+<td>legal@bank.co.jp</td>
+<td>NDA改訂</td>
+<td>FINANCE_LEGAL</td>
+<td>法務＋金融</td>
+</tr>
+<tr>
+<td>6</td>
+<td>news@saas.com(List-Unsub)</td>
+<td>月次ニュースレター</td>
+<td>NEWSLETTER</td>
+<td>一括配信</td>
+</tr>
+<tr>
+<td>7</td>
+<td>client@normal.ae</td>
+<td>来月MTG日程相談</td>
+<td>CLIENT_NORMAL</td>
+<td>クライアント非緊急</td>
+</tr>
+<tr>
+<td>8</td>
+<td>client@normal.ae</td>
+<td>「至急、誤請求の件」</td>
+<td>CLIENT_URGENT</td>
+<td>緊急語</td>
+</tr>
+<tr>
+<td>9</td>
+<td>x@unknown.com</td>
+<td>文面曖昧</td>
+<td>(LLM判定/低信頼=NEEDS_REVIEW)</td>
+<td>ヒューリスティック非該当</td>
+</tr>
+<tr>
+<td>10</td>
+<td>a@x.com</td>
+<td>「不具合は発生していません」</td>
+<td>否定表現を肯定誤判定しない</td>
+<td>誤分類回避テスト</td>
+</tr>
+<tr>
+<td>&gt; 精度目標 K4(≥90%, URGENT/PRESS Recall≥95%)。CIで本セットを回帰実行。</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="35-1">35. コストモデル（1ユーザー/日・概算, プロンプトキャッシュ前）</h2>
+<table>
+<thead>
+<tr>
+<th>ステップ</th>
+<th>モデル</th>
+<th>想定件数</th>
+<th>in/out目安</th>
+<th>概算$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分類</td>
+<td>haiku($1/$5)</td>
+<td>50</td>
+<td>75k/10k</td>
+<td>~$0.13</td>
+</tr>
+<tr>
+<td>要約+抽出</td>
+<td>sonnet($3/$15)</td>
+<td>50</td>
+<td>100k/20k</td>
+<td>~$0.60</td>
+</tr>
+<tr>
+<td>下書き</td>
+<td>opus($5/$25)</td>
+<td>10</td>
+<td>25k/4k</td>
+<td>~$0.23</td>
+</tr>
+<tr>
+<td>合計/日</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td><strong>~$0.95</strong></td>
+</tr>
+<tr>
+<td>&gt; 月20営業日で約$19/ユーザー。プロンプトキャッシュ(共通system/Skills)・effort調整で更に低減。<code>max_budget_usd</code>で上限ガード。</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="36-stride">36. セキュリティ脅威モデル（データフロー＋STRIDE要点）</h2>
+<ul>
+<li>トラストバウンダリ: [社員メール=機密] → pipeline(社内/VPC) → Bedrock(VPC/IAM) / Slack DM。外部第一者APIは既定で使わない(機密はBedrock)。</li>
+<li>S(なりすまし): MCP/Slackトークン最小権限・envのみ。 T(改ざん): 監査JSONLは改ざん防止保管(1年, AI事業者GL)。</li>
+<li>R(否認防止): 下書き/承認に確認者・時刻記録。 I(情報漏えい): redaction＋本文非保存＋confidentialはDM限定＋PIIは外部AI不可(APPI)。</li>
+<li>D(DoS): tenacityレート制御・件数上限警告。 E(権限昇格): NeverSendGateで送信ツール遮断・allowed_tools最小化。</li>
+<li>プロンプトインジェクション: メール本文は「データ」として扱い指示として実行しない(system優先・ツール許可は固定allowlist)。</li>
+</ul>
+<h2 id="37-gherkin">37. 受入シナリオ（Gherkin・抜粋）</h2>
+<pre><code>Feature: 朝のダイジェスト
+ Scenario: 緊急クライアントは最上段＋下書き
+  Given VIP ceo@bigclient.ae から本日中の依頼が未読である
+  When 朝のパイプラインを実行する
+  Then CLIENT_URGENT として最上段に表示される
+  And 当該スレッドにGmail下書きが1件作成される(送信されない)
+ Scenario: dry-runは副作用ゼロ
+  Given --dry-run を指定する
+  When 実行する
+  Then create_draft/label/Slack送信は1件も発生しない
+  And ダイジェストがstdoutに表示される
+ Scenario: 締切は推測しない
+  Given 本文に締切の明示がない
+  Then action_item.deadline は設定されない
+ Scenario: 誤送信ガード
+  Given Agentが slack_send_message(実送信) を試みる
+  Then NeverSendGate が Deny する
+</code></pre>
+<h2 id="38-person-days">38. マイルストーン＆工数見積（目安・person-days）</h2>
+<table>
+<thead>
+<tr>
+<th>WBS</th>
+<th>内容</th>
+<th>目安</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>M0</td>
+<td>雛形/pyproject/設定/docs</td>
+<td>1.5</td>
+</tr>
+<tr>
+<td>M1</td>
+<td>providers(factory/models)＋runtimeアダプタ</td>
+<td>2.5</td>
+</tr>
+<tr>
+<td>M2</td>
+<td>mcp(registry/toolset)＋schemas</td>
+<td>2</td>
+</tr>
+<tr>
+<td>M3</td>
+<td>morning_email(fetch/classify/summarize/extract/draft/label/digest)</td>
+<td>4</td>
+</tr>
+<tr>
+<td>M4</td>
+<td>safety(NeverSendGate/redaction/audit)＋Skills骨子</td>
+<td>2</td>
+</tr>
+<tr>
+<td>M5</td>
+<td>delivery(slack/BlockKit)＋CLI(dry-run)</td>
+<td>1.5</td>
+</tr>
+<tr>
+<td>M6</td>
+<td>tests/eval/ruff/mypy</td>
+<td>2.5</td>
+</tr>
+<tr>
+<td>M7</td>
+<td>本セッション実データ検証＋PR</td>
+<td>1</td>
+</tr>
+<tr>
+<td>合計</td>
+<td>—</td>
+<td><strong>~17人日</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="39">39. 敬語レベル表＆日本語メールテンプレート</h2>
+<table>
+<thead>
+<tr>
+<th>Lv</th>
+<th>用途</th>
+<th>例(依頼)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>社内カジュアル</td>
+<td>〜お願いします</td>
+</tr>
+<tr>
+<td>2</td>
+<td>社内丁寧</td>
+<td>〜していただけますか</td>
+</tr>
+<tr>
+<td>3</td>
+<td>標準ビジネス(既定)</td>
+<td>〜いただけますと幸いです</td>
+</tr>
+<tr>
+<td>4</td>
+<td>取引先/目上</td>
+<td>〜いただけますようお願い申し上げます</td>
+</tr>
+<tr>
+<td>5</td>
+<td>最敬(重要顧客/謝意)</td>
+<td>〜賜りますよう謹んでお願い申し上げます</td>
+</tr>
+<tr>
+<td>テンプレ(Lv4):</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<pre><code>{会社名} {氏名}様
+いつも大変お世話になっております。{自社名}の{ユーザー名}でございます。
+{用件を敬体で。事実のみ。}
+ご確認のほど、何卒よろしくお願い申し上げます。
+{ユーザー署名}
+</code></pre>
+<h2 id="40">40. セットアップ/運用ランブック（初期設定）</h2>
+<ol>
+<li>Bedrockでモデルアクセス有効化（opus/sonnet/haiku）。IAMに <code>bedrock:InvokeModel*</code>(許可モデルARN限定)。</li>
+<li><code>models doctor</code> 実行で各モデルID(<code>anthropic.…-vN:0</code>/リージョン接頭辞)を確定し <code>providers/models.py</code> を更新。</li>
+<li>Gmail/Slack MCP を認証接続（env: トークン/URL）。<code>SLACK_DELIVERY_USER_ID</code> 設定。</li>
+<li><code>config/users/&lt;user&gt;.yaml</code> に VIP送信者/ドメイン・社内/クライアント/取引先ドメイン・TZ・敬語Lv既定 を投入。</li>
+<li><code>pip install -e .[dev]</code> → <code>pytest</code>/<code>ruff</code>/<code>mypy</code> → <code>--dry-run</code> で確認 → 本番cron(平日07:00)有効化。</li>
+<li>監査ログ保管(1年)・kill switch・停止手順を運用手順書に明記。</li>
+</ol>
+<h2 id="41-mcp">41. MCP呼び出し具体例（参照）</h2>
+<pre><code>mcp__Gmail__search_threads(query=&quot;is:unread newer_than:1d -category:promotions -category:social&quot;, pageSize=50)
+mcp__Gmail__get_thread(threadId=&quot;t_abc&quot;, messageFormat=&quot;FULL_CONTENT&quot;)
+mcp__Gmail__list_drafts(pageSize=50)
+mcp__Gmail__create_label(displayName=&quot;AIIA/CLIENT_URGENT&quot;)   # 初回のみ
+mcp__Gmail__create_draft(to=[...], subject=&quot;Re: ...&quot;, body=&quot;&lt;敬語下書き&gt;&quot;, replyToMessageId=&quot;m_...&quot;)
+mcp__Slack__slack_send_message_draft(channel_id=&quot;&lt;USER_ID&gt;&quot;, message=&quot;&lt;Block Kit/Markdown&gt;&quot;)
+</code></pre>
+<h2 id="42-slackai2">42. 全体ビジョン: Slackネイティブ営業AIアシスタント（2モード統合）</h2>
+<ul>
+<li><strong>モードA 対話（オンデマンド）</strong>: Slackで@メンション/DM → ChatGPTのように会話。社内<strong>RAG</strong>(過去事例/Drive/蓄積出力)で回答＋<strong>資料/提案書生成</strong>＋ツール呼出(VSEO等)。実装=Slackアプリ→Claude Agent SDK→MCP＋RAG。発話者↔Workspaceメール紐付けで本人文脈/文体適用。</li>
+<li><strong>モードB 朝メール（プロアクティブ・定時）</strong>: 各人TZ ~8時に各営業のGmailを読み サマリー＋ToDo＋下書き→Slack DM。人間は意思決定のみ。←本書の主実装。</li>
+<li>共有基盤: providers(Bedrock既定)＋MCP＋KB＋安全(NeverSendGate)＋監査＋個人ID/文体。出力はKBへ蓄積し自己改善(§44)。</li>
+</ul>
+<h2 id="43-20">43. マルチユーザー（営業20名）＋認証＋個人別パーソナライズ ★確定</h2>
+<h3 id="431-gmailcalendar-oauth3-leggedaws-dwd">43.1 Gmail/Calendar接続 = 個人別OAuth（3-legged）＋トークン保管(AWS)【変更: DWDは情シス不可】</h3>
+<blockquote>
+<p>情シス判断でDWD不可 → <strong>各人がGoogle OAuthで個別同意</strong>する方式へ変更（ユーザー提示の運用フロー）。<br />
+- <strong>フロー</strong>: ①SlackでユーザーがAgentに「連携して」→Agentが本人専用の<strong>OAuth同意URL</strong>(state=user_id, PKCE)をSlackで返す → ②同意 → ③コールバック(API Gateway+Lambda)が認可コード→<strong>refresh_token</strong>取得 → ④<strong>DynamoDB</strong>にuser_id紐付けで<strong>KMS暗号化</strong>保存(Slackユーザー↔Googleユーザー対応も保持) → ⑤以降はrefresh_token→access_token更新し本人代理でGmail/Calendar API実行。<br />
+- <strong>スコープ(最小)</strong>: <code>gmail.readonly</code>＋<code>gmail.compose</code>(下書き)＋<code>gmail.labels</code>＋<code>calendar.readonly</code>。<strong><code>gmail.send</code>は要求しない</strong>＝誤送信を構造的に不可能化(送信は人間)。<br />
+- <strong>AWS構成(OpenClaw的ゲートウェイ)</strong>: Slackイベント→OAuthコールバック→<strong>トークンVault(DynamoDB+KMS)</strong>→Agent実行(Claude Agent SDK+Bedrock)。OpenClawをチャネル/ゲートウェイ層に充当可。<br />
+- <strong>実装</strong>: <code>auth/oauth.py</code>(同意URL/コード交換/トークン更新)・<code>auth/token_store.py</code>(DynamoDB+KMS)・<code>mcp/toolset.py</code>に<strong><code>UserGoogleToolset</code></strong>(per-user access_tokenでGmail/Calendar)。dev=Harness, test=Fake。<br />
+- <strong>必要env</strong>: <code>GOOGLE_CLIENT_ID</code>/<code>GOOGLE_CLIENT_SECRET</code>/<code>GOOGLE_OAUTH_REDIRECT_URI</code>/<code>DYNAMODB_TOKEN_TABLE</code>/<code>KMS_KEY_ID</code>/<code>SLACK_BOT_TOKEN</code>/<code>SLACK_SIGNING_SECRET</code>（＋AWS/Bedrock）。<code>.env.example</code>を本方式に更新。<br />
+- <strong>セキュリティ</strong>: refresh_tokenはKMS暗号化・DynamoDB・最小スコープ・send無し・<strong>ユーザー間分離</strong>・per-user監査・本人が連携解除可。秘密はenv/Secrets Managerのみ・<strong>リポジトリにコミットしない</strong>。<br />
+- <strong>将来の拡張Googleスコープ(Phase2+・許可済)</strong>: RAG検索/資料生成のため <code>drive.readonly</code>(社内ナレッジ参照)＋<code>drive.file</code>(生成物作成) を追加同意。Claude Agent SDK が Gmail/Calendar/Drive API をツールとして使い、<strong>RAG検索＋ドキュメント生成</strong>に活用（§44と接続）。</p>
+</blockquote>
+<h3 id="432-styleprofile-opt-in">43.2 個人別文体(StyleProfile) = 送信済み＋採用下書きから自動学習(opt-in)【確定】</h3>
+<ul>
+<li>StyleProfile(per-user): 挨拶/結び/敬語レベル/口調/常用フレーズ/署名。</li>
+<li>ブートストラップ(opt-in): 本人の<strong>Sent</strong>直近N通から文体抽出。継続学習: 採用/修正下書きの差分で更新。</li>
+<li>利用: DRAFT = 一般敬語規則＋StyleProfile(Sent few-shot)→<strong>本人の声で生成</strong>。</li>
+<li>プライバシー: opt-in・per-user分離・Sentは文体サマリ＋少数手本のみ保持(全文非蓄積)・PII遮蔽・本人がリセット可。</li>
+<li>実装: <code>agents/morning_email/style.py</code>＋<code>config/users/&lt;id&gt;.yaml</code>の<code>style</code>節＋per-userメモリ。</li>
+</ul>
+<h3 id="433-20">43.3 20名スケール</h3>
+<ul>
+<li>マルチテナント厳格分離。スケジュールは各TZで分散(07:45–08:15)・セマフォで並列度制御。</li>
+<li>レート/コスト: Gmailは per-user quota。Bedrock TPMは並列度上限で平準化。概算 ~20×$19/月 ≈ <strong>$380/月</strong>・<code>max_budget_usd</code>。</li>
+<li>オンボーディング: 管理者が名簿(Workspaceメール)追加→DWDで即接続→opt-inでSent文体ブートストラップ。Slackユーザー↔メール紐付け。</li>
+<li>pipelineは <code>UserConfig</code>/StyleProfile/Gmailクライアントを<strong>引数注入</strong>でper-user実行。</li>
+</ul>
+<h2 id="44-agentvseo">44. 拡張Agent（VSEOリサーチ / 資料生成 / 自己改善ループ）</h2>
+<blockquote>
+<p>参考=①VSEO提案書(プラチナム×ベクトル「無添蔵 新宿」19枚) ②VSEOレポートHTML(teamagent) ③Bedrock公式doc。①②は出力仕様の正典。<br />
+- <strong>VSEOリサーチ</strong>: 対象＋シードKW→<strong>TikTok上位10本</strong>取得→Algrow <code>analyze_video</code>/<code>read_transcript</code>/<code>get_video_thumbnail</code>でAI解析→共通点(フック0-3s/シズル/後出し価格/3選/マルチKW交差/サムネ統計)→目標順位＋KPI→レポート(HTML)＋提案(Figma)。★ギャップ: TikTok KW上位ランキング取得はAlgrow標準に無い→スクレイプ源(既存teamagent等)確保。<br />
+- <strong>資料生成</strong>: Drive過去事例/テンプレを<strong>RAG引用</strong>＋他Agent出力統合→提案書/スライド(Figma/Drive)→人手レビュー。<br />
+- <strong>自己改善ループ</strong>: 全出力＋人手FB(採用/修正)を内部KB(Drive＋Skill/メモリ)へ蓄積→次回がRAG引用し<strong>複利向上</strong>(Opt§28.1同型)。</p>
+</blockquote>
+<h2 id="45-bedrock-doc">45. 既定モデル経路の最新事実（Bedrock doc）＋セキュリティ</h2>
+<ul>
+<li>新「Amazon Bedrock の Claude」: <code>AnthropicBedrockMantle</code>・<code>bedrock-mantle.{region}.api.aws/anthropic/v1/messages</code>・Messages API形状。<strong>研究プレビュー/us-east-1のみ/専用AWSアカウント要(AE申請)</strong>。ID=<code>anthropic.</code>接頭辞。</li>
+<li>対応: プロンプトキャッシュ/拡張思考/<strong>クライアント定義ツール</strong>/構造化出力。非対応: Anthropicサーバーツール(Web Search/Remote MCP/Memory/Files/サーバー側Skills/Code Execution)・Agent API・Batches・<strong>ZDRなし(30日保持)</strong>。</li>
+<li>★整理: MCP/サブAgent/ローカルSkillは Claude Agent SDK がクライアント側で実行しBedrockへは<code>messages.create</code>のみ→<strong>Bedrockで動作</strong>。</li>
+<li>⚠ VSEOレポートのS3リンクは<strong>IAM長期キー(AKIA…)埋込の署名付きURL</strong>→社外共有は短期STS/最小権限で。</li>
+</ul>
+<h2 id="46-google-calendar">46. 本日の予定（Google Calendar連携）★追加</h2>
+<ul>
+<li><strong>目的</strong>: 朝ダイジェスト先頭に「📅 本日の予定」を表示し、1日の流れ(会議/空き)を一目で把握。</li>
+<li><strong>認証</strong>: 既存DWDに <code>calendar.readonly</code> スコープを追加(管理者付与のみ・<strong>個別同意不要</strong>)。SAで各人をimpersonateしCalendar API取得。</li>
+<li><strong>取得</strong>: 当日(各人TZ)の予定を取得(開始/終了/件名/場所/会議URL/出席者/終日/ステータス)。</li>
+<li><strong>表示</strong>: 時刻順リスト＋初回/最終/会議数＋背中合わせ(連続)や空き時間を注記。</li>
+<li><strong>メール×予定の相互リンク</strong>: 送信者が当日MTGの出席者なら該当メールに「本日MTGあり」フラグ→優先度補正。</li>
+<li><strong>実装</strong>: <code>mcp/toolset.py</code>に<code>fetch_today_events(user)</code>／<code>WorkspaceCalendarToolset</code>(DWD)＋Fake。<code>schemas.py</code>に<code>CalendarEvent</code>/<code>DaySchedule</code>。<code>digest.py</code>に予定セクション。<code>config</code>でON/OFF・対象カレンダー・勤務時間。</li>
+<li><strong>本セッション</strong>: Calendar MCPは未接続のため検証はFake/サンプルで(本番はCalendar API/DWD)。 セキュリティ: 読取専用・per-user分離・同DWD境界。</li>
+</ul>
+<h2 id="47-aws-a">47. AWS構築方針（確定: ユーザー選択「A」）</h2>
+<ul>
+<li><code>aiia-dev</code> IAMユーザーに <strong>AdministratorAccess</strong> を一時付与 → 私がライブで ①Bedrock権限/リージョン修正の確認・推論テスト ②（将来）OAuth基盤(DynamoDB+KMS+Lambda+API Gateway)構築 を実行。</li>
+<li><strong>作業完了後に必ず: キー無効化(ローテーション)＋AdministratorAccessを外し最小権限へ戻す</strong>（鍵がチャットに露出したため）。</li>
+<li>並行して <code>infra/</code> にTerraform(IaC)を残し、本番は再現可能な形で適用。</li>
+</ul>
+<h2 id="48-4agentphase1">48. 最終実装プラン（4サブAgent議論の統合・Phase1）★承認対象</h2>
+<h3 id="481-context">48.1 Context</h3>
+<p><strong>何を作るか</strong>: 朝メールAgent(モードB)を、最終形「Slackネイティブ営業AIアシスタント(モードA対話＋RAG＋資料生成)」へ<strong>書き直しゼロで拡張可能な土台</strong>として構築する。営業20名のマルチユーザー運用＋個人別OAuth(情シス指示・§43.1)＋StyleProfile(opt-in)＋本日の予定(§46)。<br />
+<strong>いま到達点</strong>: schemas/triage/config/llm(HeuristicLLM)/safety/audit/redaction/hitl 実装済(30%)。AWS Bedrock 接続実証済(<code>us.anthropic.claude-…</code> 推論プロファイル稼働)。<br />
+<strong>残り(Phase1)</strong>: providers(Bedrock LLM)・mcp(Protocol/Fake/Harness)・pipeline(2段分類/async)・delivery/slack(BlockKit)・orchestrator(直起動)・拡張シーム5本(SubAgent/NullRAGClient/Renderer/StyleProfile/AgentPolicy)・tests・docs。</p>
+<h3 id="482">48.2 設計確定事項（議論結論）</h3>
+<ol>
+<li><strong>runtime層はPhase1不要</strong> — pipelineはLLM+MCPToolsetの2 Protocolだけで動く。<code>runtime/sdk.py</code>(Agent SDK)はPhase2のモードA(Slack対話)で初投入。Phase1のコードは触らない。</li>
+<li><strong>2段分類</strong>: ヒューリスティック confidence ≥ 0.8 はそのまま採用、&lt; 0.8 のみ LLM 確定 → コスト最小化。</li>
+<li><strong>JSON強制は tool_use(function calling)</strong> — Bedrockの<code>output_config.format</code>より互換高い(<code>providers/schema_tool.py</code>でpydantic→tool spec変換、<code>$ref</code>展開＋<code>additionalProperties:false</code>注入)。</li>
+<li><strong>誤送信不可能を型レベル</strong> — <code>MCPToolset</code> Protocolに<code>send_message</code>を含めない(構造的に呼べない)。<code>NeverSendGate</code>が二重防御。CI で <code>slack_send_message</code>/<code>gmail_send_message</code> の文字列を orchestrator から grep 検出(pre-commit候補)。</li>
+<li><strong>harness の現実解</strong> — Python から <code>mcp__Gmail__*</code> は直接呼べない → 本AIが手で1スレッドずつ fixture 化 → <code>mcp/harness.py</code> が <code>tests/fixtures/threads/*.json</code> を読む人手協調モード。Phase2 で <code>workspace_gmail.py</code>(Google API client + per-user OAuth)に差し替え可。</li>
+<li><strong>async + Semaphore(4)</strong> — MCPはI/O bound、asyncio で並列、上限4でレート配慮。LLMが同期SDKなら<code>asyncio.to_thread</code>に逃がす。</li>
+<li><strong>失敗の分離</strong> — 1スレッドの失敗は他へ伝播させず<code>needs_review</code>に降格、全体は完走。</li>
+<li><strong>自動フォールバック</strong> — Bedrock初期化失敗→HeuristicLLM。本番は<code>AIIA_STRICT_PROVIDER=1</code>で厳格。</li>
+<li><strong>Figmaは対象外</strong>(撤回)、Slack Bot 本体はユーザー提供(アプリはBlockKit JSON生成・MCP draft送信を担当)。</li>
+</ol>
+<h3 id="483-phase11800">48.3 ファイル構成（新規作成・Phase1合計約1,800行）</h3>
+<pre><code>src/aiia/
+├── providers/   base.py(60)+errors.py(30)+models.py(60)+schema_tool.py(80)+prompts.py(80)+anthropic_llm.py(200)+factory.py(80)
+├── mcp/         base.py(100)+errors.py(20)+fake.py(150)+harness.py(120)+__init__.py(30)
+├── runtime/     base.py(80)+direct.py(60)              ※sdk.pyはPhase2
+├── pipeline.py  (200) ★純粋オーケストレーション
+├── delivery/    slack.py(150) ★BlockKit renderer
+├── orchestrator/ orchestrator.py(120)
+├── agents/      base.py(50)+morning_email/agent.py(80)  ※SubAgent Protocol予約
+├── kb/          base.py(25)+null.py(15)                  ※RAGClient Protocol予約(NullRAGClient実装)
+├── render/      base.py(10)+slack_blocks.py(80)          ※Renderer Protocol予約
+├── profile/     base.py(30)+file_store.py(30)            ※StyleProfile型・load経路だけ
+├── store/       base.py(15)+local_file.py(40)            ※KeyValueStore抽象(audit/digest/profile共通)
+├── safety/      policy.py(40) ★AgentPolicy + MORNING_EMAIL_POLICY
+└── scripts/     run_morning_email.py(80)
+config/         platform.yaml + agents/morning_email.yaml + users/example_user.yaml
+tests/          conftest.py + test_pipeline.py + test_classify.py + test_redaction.py + test_safety.py + test_blocks.py + test_config.py + fixtures/threads/
+docs/           00-architecture.md + 01-triaging.md (ADR2本)
+</code></pre>
+<p><strong>既存ファイル最小改修</strong>:<br />
+- <code>llm.py</code>: <code>LLM.draft(*, style: StyleProfile|None=None)</code> キーワード予約(後方互換)<br />
+- <code>safety/audit.py</code>: <code>_ALLOWED_META</code>に予約キー追加(<code>confirmed_by, confirmation_id, policy, agent, conversation_id, citation_count</code>)<br />
+- <code>config.py</code>: <code>PlatformConfig</code>に<code>kb</code>/<code>renderer</code>/<code>profile</code>のOptional節予約</p>
+<h3 id="484-api">48.4 主要API契約</h3>
+<pre><code class="language-python"># providers/base.py — LLM Protocol(既存をproviders/に移管・llm.pyは再export)
+class LLM(Protocol):
+    name: str
+    def classify(self, thread, user) -&gt; ClassificationResult: ...
+    def summarize(self, thread) -&gt; ThreadSummary: ...
+    def extract(self, thread) -&gt; list[ActionItem]: ...
+    def draft(self, thread, summary, user, *, style: StyleProfile|None=None) -&gt; DraftReply: ...
+
+# mcp/base.py — MCPToolset Protocol(送信系を構造的に含めない)
+class GmailTools(Protocol):
+    async def search_threads(self, query, page_token=None, max_results=50) -&gt; dict: ...
+    async def get_thread(self, thread_id) -&gt; EmailThread: ...
+    async def list_drafts(self, thread_id=None) -&gt; dict: ...
+    async def create_draft(self, *, thread_id, subject, body) -&gt; str: ...   # 下書きのみ
+    async def label_thread(self, *, thread_id, label) -&gt; None: ...
+class SlackTools(Protocol):
+    async def send_draft(self, *, channel, blocks, text) -&gt; str: ...        # 下書きのみ
+class MCPToolset(Protocol):
+    gmail: GmailTools
+    slack: SlackTools
+    calendar: CalendarTools | None = None  # Phase2 §46
+
+# pipeline.py
+@dataclass(frozen=True)
+class PipelineDeps:
+    llm: LLM; tools: MCPToolset; models: ModelTier; audit: AuditLog
+    user: UserConfig; agent: MorningEmailConfig
+    dry_run: bool = True; max_concurrency: int = 4
+async def run(deps: PipelineDeps) -&gt; AgentResult: ...
+
+# agents/base.py — SubAgent Protocol(Phase2モードAで使う、Phase1で予約)
+@dataclass(frozen=True)
+class AgentContext:
+    user: UserConfig; platform: PlatformConfig; llm: LLM; audit: AuditLog
+    gate: NeverSendGate
+    kb: RAGClient|None = None         # Phase2で注入
+    renderer: Renderer|None = None    # Phase2で注入
+    style_profile: StyleProfile|None = None
+    conversation_id: str|None = None
+class SubAgent(Protocol):
+    name: str
+    def run(self, ctx: AgentContext, prompt: str|None = None) -&gt; AgentResponse: ...
+</code></pre>
+<h3 id="485-kpi1">48.5 KPI担保マッピング(§1)</h3>
+<table>
+<thead>
+<tr>
+<th>KPI</th>
+<th>担保箇所</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>K1 朝確認 -70%</td>
+<td>pipeline async+Semaphore(4)・2段分類</td>
+</tr>
+<tr>
+<td>K2 VIP/プレス見落とし0</td>
+<td>triage先勝ち＋テスト§34評価セット(Recall≥95%)</td>
+</tr>
+<tr>
+<td>K3 採用率≥50%</td>
+<td>HeuristicLLM中立下書き → Bedrock高品質 → StyleProfile(Phase2)</td>
+</tr>
+<tr>
+<td>K4 分類精度≥90%</td>
+<td>triage(8段先勝ち)＋LLM(&lt;0.8)＋eval CIで回帰</td>
+</tr>
+<tr>
+<td>K5 誤送信0(恒久)</td>
+<td>MCPToolset型から除外＋NeverSendGate二重＋CI grep</td>
+</tr>
+<tr>
+<td>K6 敬語スコア≥4.0</td>
+<td>HeuristicLLM keigo_level階層＋StyleProfile</td>
+</tr>
+<tr>
+<td>K7 監査100%(1年)</td>
+<td>AuditLog JSONL＋KeyValueStore抽象</td>
+</tr>
+</tbody>
+</table>
+<h3 id="486-dry-run">48.6 実装順序(--dry-run通すまで最短経路)</h3>
+<ol>
+<li>mcp/(base+fake+harness雛形) — Protocol凍結＋FakeでHITし得る基盤</li>
+<li>providers/(base+errors+models+schema_tool+factory) — 抽象＋切替＋HeuristicLLMフォールバック</li>
+<li>pipeline.py — fetch/normalize/classify(2段)/summarize/extract/draft/run</li>
+<li>delivery/slack.py — render_slack_blocks + render_digest_text(BlockKit制約49/2900)</li>
+<li>orchestrator/ + scripts/run_morning_email.py(<code>--dry-run</code>既定True)</li>
+<li>tests/(conftest+pipeline+blocks+redaction+safety+config) + fixtures</li>
+<li>ここで <code>python -m aiia.scripts.run_morning_email --dry-run</code> 通る ✅</li>
+<li>providers/anthropic_llm.py(Bedrock化) + prompts.py — <code>--profile bedrock</code>で実推論</li>
+<li>mcp/harness.py 本セッション fixture投入 → 実データdry-run検証(read-only+下書き)</li>
+<li>docs/(ADR2本) → コミット/プッシュ/ドラフトPR</li>
+</ol>
+<p><strong>目安: Phase1で7-8営業日</strong>。Phase2(モードA・OAuth・StyleProfile自動学習・Calendar・RAG・資料生成)は新規ファイル追加のみで既存ファイルは触らない。</p>
+<h3 id="487-dod">48.7 検証手順(DoD)</h3>
+<ul>
+<li>ruff/mypy 緑</li>
+<li>pytest 全件緑、coverage ≥ 80%</li>
+<li><code>--dry-run --profile heuristic</code> がネットワーク無で完走、終了コード0、副作用ゼロ(FakeMCPToolset.calls にcreate_draft/label_thread/send系が現れない)</li>
+<li><code>--profile bedrock</code> でBedrock経由Claude推論が通る(本セッションで実証済認証情報)</li>
+<li>本セッションでGmail/Slack MCPからfixture 3-5件作成→harnessでpipeline実行→生成ダイジェスト(BlockKit JSON＋テキスト)＋下書き(Gmail create_draft + Slack send_message_draft)を<strong>人間が確認</strong>、送信は全て人手</li>
+<li>ブランチ<code>claude/vibrant-galileo-lXVG6</code>にコミット&amp;プッシュ→<strong>ドラフトPR</strong>作成</li>
+</ul>
+<h3 id="488-47">48.8 セキュリティ事後処理(§47補強)</h3>
+<ul>
+<li>本Phase1完了後: <code>aiia-dev</code> のアクセスキー無効化(ローテーション)、AdministratorAccessを外しBedrock最小権限ポリシーに戻す。Phase2のOAuth基盤(DynamoDB+KMS)構築時のみ再度広い権限を一時付与。</li>
+</ul>
+<h2 id="51-plan">51. 実装順序（確定・Planエージェント設計）★着手順</h2>
+<p><strong>核心</strong>: 外部(AWS/Bedrock/実メール)に繋がない「緑の核」をS0–S7で完成 → S8以降で外部を差込(外部障害がCIを赤にしない)。各ステップ末で必ず pytest 緑・1ステップ1コミット。<br />
+- <strong>S0</strong> pyproject確定: dev依存(pytest-cov、<strong>pytest-asyncio不要</strong>)・coverage omit(anthropic_llm/harness/scripts)・ruff/mypy。<code>pip install -e .[dev]</code>成功。<br />
+- <strong>S1</strong> <code>mcp/registry.py</code>: ツール名・<code>SEND_TOOLS</code>/<code>ALLOWED_TOOLS</code>(frozenset)・ラベル名の単一真実源。<code>safety/hitl.py</code>はregistry re-importへ(値不変)。<code>test_safety</code>緑。<br />
+- <strong>S2</strong> <code>mcp/base.py</code>(MCPToolset Protocol・全同期・ネスト<code>tools.gmail.*</code>・<code>get_thread→EmailThread</code>・送信系除外)＋<code>mcp/fake.py</code>(FakeMCPToolset・<code>.calls</code>記録)。<br />
+- <strong>S3</strong> <code>providers/</code>(base再export/errors/models/<code>schema_tool</code>($ref展開・additionalProperties:false・datetime→string・enum展開)/prompts/factory)。heuristic既定・失敗フォールバック。<code>schema_tool</code>単体テスト緑。<br />
+- <strong>S4</strong> <code>pipeline.py</code>(<code>PipelineDeps</code>＋<code>run(deps)</code>・全同期・2段分類・失敗分離→needs_review・<code>assert_no_send</code>発火・dry_runは副作用ゼロ)。<code>test_pipeline</code>緑(§22全観点)。<br />
+- <strong>S5</strong> <code>delivery/slack.py</code>(<code>render_slack_blocks</code>/<code>render_digest_text</code>・49ブロック/2900字・空/大量/quiet)。<code>test_blocks</code>緑。<br />
+- <strong>S6</strong> <code>orchestrator.py</code>＋<code>scripts/run_morning_email.py</code>(<code>--dry-run</code>既定True/<code>--profile</code>)＋<code>config/*.yaml</code>3種。<br />
+- <strong>★S7</strong> tests仕上げ＋eval(§34)＋Fake fixtures。<code>pytest --cov</code>≥80%・ruff・mypy緑 → <strong><code>--dry-run --profile heuristic</code>が副作用ゼロで緑＝第1マイルストーン(ネット/Bedrock不要)</strong>。<br />
+- <strong>S8</strong> <code>providers/anthropic_llm.py</code>(<code>AnthropicBedrock</code>＋<code>us.</code>推論プロファイル＋tool_use JSON強制)。<code>aws_smoke_test</code>で JSON強制(tool_use→不可ならJSONテキスト)とパラメータ受理を実認証で確定。<code>--profile bedrock</code>で実推論。<br />
+- <strong>S9</strong> <code>mcp/harness.py</code>＋人手協調fixture(本AIが<code>mcp__Gmail__*</code>を手で叩き3-5件JSON化→harness読込→pipeline実行→<code>create_draft</code>/<code>slack_send_message_draft</code>を人間確認)。実fixtureはコミットしない(PII)。<br />
+- <strong>S10</strong> docs(ADR2本)→push→<strong>ドラフトPR</strong>(モデルID/実fixture/秘密は含めない)。<br />
+- リスク回避: S1循環import回避(registry最下層・片方向import)／S3でschema_tool単体検証→S8で一発／S4失敗分離／dry_runは<code>assert_no_send</code>手前で分岐。</p>
+<h2 id="_1">実装の進め方（最終）</h2>
+<p>Phase1の実装順序は §48.6 のとおり。<strong>Figma対象外</strong>、<strong>モデル識別子はコミット/PRに含めない</strong>、すべての送信は常に人間が最終実行(下書きのみ自動)。</p>
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  document.querySelectorAll("pre > code.language-mermaid").forEach(function(c){
+    var d=document.createElement("div"); d.className="mermaid"; d.textContent=c.textContent;
+    c.parentElement.replaceWith(d);
+  });
+  try{ mermaid.initialize({startOnLoad:true, securityLevel:"loose"}); }catch(e){}
+</script>
+</body>
+</html>
