@@ -33,6 +33,23 @@ class SlackDelivery:
             return str(resp["channel"]["id"])
         return None
 
+    def recent_messages(
+        self, channel: str, *, user_id: Optional[str] = None, limit: int = 50
+    ) -> list[str]:
+        """チャンネル直近メッセージのテキスト。user_id 指定で本人発言のみ（文体学習用）・
+        未指定で全員（grounding=チャンネル文脈用）。要 channels:history/groups:history。"""
+        resp = self._wc().conversations_history(channel=channel, limit=limit)
+        if not resp.get("ok"):
+            return []
+        out: list[str] = []
+        for m in resp.get("messages", []):
+            if user_id is not None and m.get("user") != user_id:
+                continue
+            text = m.get("text")
+            if text:
+                out.append(text)
+        return out
+
     def send_digest(self, *, email: str, blocks: list, text: str) -> bool:
         """本人DMへ朝ダイジェストを送る。email解決/DM open/送信のいずれか失敗で False。"""
         uid = self.user_id_for_email(email)

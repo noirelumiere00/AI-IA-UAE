@@ -104,6 +104,18 @@ class WorkspaceGmail:
                 out.append({"thread_id": tid})
         return {"drafts": out}
 
+    def list_sent(self, max_results: int = 30) -> list[str]:
+        """送信済みメール(SENT)の本文スニペットを返す（M3 文体学習用）。SENT はシステムラベル。"""
+        svc = self._svc()
+        resp = svc.users().messages().list(userId="me", labelIds=["SENT"], maxResults=max_results).execute()
+        texts: list[str] = []
+        for m in resp.get("messages", []):
+            full = svc.users().messages().get(userId="me", id=m["id"], format="metadata").execute()
+            snippet = full.get("snippet", "")
+            if snippet:
+                texts.append(snippet)
+        return texts
+
     def create_draft(self, *, thread_id: str, subject: str, body: str) -> str:
         mime = MIMEText(body, _charset="utf-8")
         mime["Subject"] = subject
