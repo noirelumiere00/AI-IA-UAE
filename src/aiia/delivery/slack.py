@@ -13,6 +13,34 @@ from aiia.schemas import BASE_PRIORITY, CATEGORY_EMOJI, Category, Digest, Digest
 _MAX_BLOCKS = 49
 _MAX_TEXT = 2900
 
+# 対話ボタンの action_id（M2 の block_actions ハンドラが束縛）。value には thread_id を載せる。
+ACTION_EDIT = "aiia_edit_draft"
+ACTION_DELETE = "aiia_delete_item"
+ACTION_SEND = "aiia_send_reply"
+_ITEM_BLOCK_PREFIX = "aiia_item_"
+
+
+def _item_actions(thread_id: str) -> dict:
+    """各メール項目の操作ボタン。送信は Slack ネイティブ確認(1/2)付き＝2段確認の1段目。"""
+    return {
+        "type": "actions",
+        "block_id": f"{_ITEM_BLOCK_PREFIX}{thread_id}",
+        "elements": [
+            {"type": "button", "action_id": ACTION_EDIT,
+             "text": {"type": "plain_text", "text": "📝 編集"}, "value": thread_id},
+            {"type": "button", "action_id": ACTION_DELETE,
+             "text": {"type": "plain_text", "text": "🗑 削除"}, "value": thread_id},
+            {"type": "button", "action_id": ACTION_SEND, "style": "primary",
+             "text": {"type": "plain_text", "text": "📤 送信"}, "value": thread_id,
+             "confirm": {
+                 "title": {"type": "plain_text", "text": "送信の確認 (1/2)"},
+                 "text": {"type": "mrkdwn", "text": "この下書きを送信しますか？次の画面でもう一度確認します。"},
+                 "confirm": {"type": "plain_text", "text": "次へ"},
+                 "deny": {"type": "plain_text", "text": "やめる"},
+             }},
+        ],
+    }
+
 
 def _date_label(d: Digest) -> str:
     g = d.generated_at
@@ -70,8 +98,12 @@ def _section(text: str) -> dict:
     return {"type": "section", "text": {"type": "mrkdwn", "text": text[:_MAX_TEXT]}}
 
 
-def render_slack_blocks(d: Digest) -> list[dict]:
-    """Slack Block Kit。≤49ブロックに収める（超過分は『Gmailで確認』に集約）。"""
+def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
+    """Slack Block Kit。≤49ブロックに収める（超過分は『Gmailで確認』に集約）。
+
+    interactive=True で下書きのある項目に操作ボタン[📝編集/🗑削除/📤送信]を付与（M2の常駐アプリ用）。
+    M1のバッチ配信は interactive=False（ボタン無し＝クリックしても動く相手がいないため）。
+    """
     draft_n = sum(1 for it in d.items if it.draft)
     blocks: list[dict] = [
         {"type": "header", "text": {"type": "plain_text", "text": f"📬 朝のダイジェスト — {_date_label(d)}"}},
@@ -102,6 +134,9 @@ def render_slack_blocks(d: Digest) -> list[dict]:
             blocks.append(_section(
                 f"*{it.sender}*{flag}\n件名: {it.subject}\n要約: {it.summary.one_liner}{dl_line}{draft_line}{link}"
             ))
+            # 下書きのある項目だけ操作ボタン（編集/削除/送信）。送信は2段確認の1段目付き。
+            if interactive and it.draft and len(blocks) < _MAX_BLOCKS - 2:
+                blocks.append(_item_actions(it.thread_id))
 
     quiet_txt = " ・ ".join(
         f"{CATEGORY_EMOJI[c]} {c.value} ({n})"
