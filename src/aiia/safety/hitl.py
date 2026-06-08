@@ -8,26 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# 外部送信系（常に遮断）
-SEND_TOOLS = {
-    "mcp__Gmail__send_message",
-    "mcp__Gmail__send_draft",
-    "mcp__Slack__slack_send_message",
-    "mcp__Slack__slack_schedule_message",
-}
+# 送信遮断/許可セットは registry に集約（単一真実源）。ここは re-import して後方互換を保つ。
+from aiia.mcp.registry import ALLOWED_TOOLS, SEND_TOOLS
 
-# 許可（読取・下書き・ラベル）
-ALLOWED_TOOLS = {
-    "mcp__Gmail__search_threads",
-    "mcp__Gmail__get_thread",
-    "mcp__Gmail__list_drafts",
-    "mcp__Gmail__list_labels",
-    "mcp__Gmail__create_label",
-    "mcp__Gmail__create_draft",
-    "mcp__Gmail__label_thread",
-    "mcp__Gmail__label_message",
-    "mcp__Slack__slack_send_message_draft",
-}
+__all__ = ["ALLOWED_TOOLS", "SEND_TOOLS", "GateDecision", "AutoSendError", "NeverSendGate", "assert_no_send"]
 
 
 @dataclass
