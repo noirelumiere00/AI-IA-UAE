@@ -17,6 +17,7 @@ from aiia import triage
 from aiia.config import PlatformConfig, UserConfig
 from aiia.providers import models as model_resolver
 from aiia.providers import prompts, schema_tool
+from aiia.runtime.retry import call_with_retry
 from aiia.schemas import (
     ActionItem,
     ClassificationResult,
@@ -47,11 +48,27 @@ class AnthropicLLM:
 
             self._client = AnthropicBedrock(aws_region=self._region)
 
+    def _create(self, **kwargs: Any) -> Any:
+        """messages.create を Bedrock throttle 用の指数バックオフで包む。"""
+        return call_with_retry(lambda: self._client.messages.create(**kwargs))
+
+    def summarize_text(self, system: str, user: str, *, max_tokens: int = 512) -> str:
+        """汎用テキスト要約（StyleProfile 抽出用・haiku）。tool_use なし・素テキスト。"""
+        msg = self._create(
+            model=self._models["classify"],  # 軽量＝haiku 相当
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return "".join(
+            getattr(b, "text", "") for b in msg.content if getattr(b, "type", None) == "text"
+        ).strip()
+
     # ── 構造化出力（強制 tool_use・1回リトライ） ─────────────────────────────
     def _emit(self, *, model: str, system: str, user: str, tool: dict[str, Any]) -> dict[str, Any]:
         prompt = user
         for _ in range(2):
-            msg = self._client.messages.create(
+            msg = self._create(
                 model=model,
                 max_tokens=2048,
                 system=system,
@@ -118,7 +135,7 @@ class AnthropicLLM:
         style: Optional[str] = None,
         slack_context: Optional[str] = None,
     ) -> DraftReply:
-        msg = self._client.messages.create(
+        msg = self._create(
             model=self._models["draft"],
             max_tokens=2048,
             system=prompts.DRAFT_SYSTEM,
