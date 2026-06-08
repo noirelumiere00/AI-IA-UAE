@@ -44,7 +44,13 @@ class SlackTools(Protocol):
 
 @runtime_checkable
 class MCPToolset(Protocol):
-    """道具一式。gmail / slack をネスト保持（tools.gmail.search_threads のように使う）。"""
+    """道具一式。gmail / slack をネスト保持（tools.gmail.search_threads のように使う）。
 
-    gmail: GmailTools
-    slack: SlackTools
+    属性は読み取り専用プロパティ（共変）にする＝実装側が GmailTools のサブ型(FakeGmail 等)を
+    持っていても代入可能（不変属性だと型不一致になるため）。
+    """
+
+    @property
+    def gmail(self) -> GmailTools: ...
+    @property
+    def slack(self) -> SlackTools: ...

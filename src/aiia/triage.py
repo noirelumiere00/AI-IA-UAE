@@ -107,7 +107,7 @@ def heuristic_signals(thread: EmailThread, user: "UserConfig") -> Hints:
     if thread.latest:
         headers = {k.lower(): v for k, v in thread.latest.headers.items()}
     h.is_newsletter = "list-unsubscribe" in headers or "noreply" in sender or "no-reply" in sender
-    h.is_confidential = bool(CONFIDENTIAL_LABELS & {l.lower() for l in thread.labels})
+    h.is_confidential = bool(CONFIDENTIAL_LABELS & {lbl.lower() for lbl in thread.labels})
     h.amount_jpy = _parse_amount(text)
     kp = _KEY_PERSON_RE.search(text)
     h.key_person = kp.group(1) if kp else None

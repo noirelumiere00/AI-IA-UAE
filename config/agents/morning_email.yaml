@@ -1,0 +1,9 @@
+# 朝メールAgent の設定。
+gmail_query: "is:unread newer_than:1d -category:promotions -category:social"
+draft_categories:   # この2カテゴリのみ返信下書きを作る（下書き＝未送信）
+  - CLIENT_URGENT
+  - PRESS_MEDIA
+delivery:
+  channel: slack_dm   # slack_dm | slack_channel | email_draft | canvas
+  mode: draft         # draft（人が送信） | send（要承認・既定では使わない）
+max_threads: 50

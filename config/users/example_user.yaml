@@ -1,0 +1,15 @@
+# ユーザー別設定（VIP・分類補助ドメイン・敬語・配信先）。秘密情報は書かない。
+user_id: example_user
+display_name: 例 太郎
+timezone: Asia/Tokyo
+slack_user_id: ""        # 本番は SLACK_DELIVERY_USER_ID(env) でも上書き可
+vip_senders: []
+vip_domains:
+  - bigclient.ae
+client_domains:
+  - client.co.jp
+partner_domains: []
+internal_domain: newstv.co.jp
+quiet_categories:        # 本体に出さず件数のみ
+  - NEWSLETTER
+keigo_level_default: 3

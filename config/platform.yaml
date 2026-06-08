@@ -1,0 +1,10 @@
+# プラットフォーム設定（プロバイダ・モデル階層）。秘密情報は書かない（env/Secrets Manager）。
+default_profile: heuristic   # heuristic（既定・無料/オフライン） / bedrock / api
+profiles:
+  bedrock:
+    name: bedrock
+    region: ap-northeast-1
+models:
+  classify: claude-haiku-4-5
+  summarize: claude-sonnet-4-6
+  draft: claude-opus-4-8
