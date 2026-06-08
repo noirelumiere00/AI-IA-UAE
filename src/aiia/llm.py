@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Protocol
+from typing import Optional, Protocol
 
 from . import triage
 from .config import UserConfig
@@ -30,7 +30,15 @@ class LLM(Protocol):
     def classify(self, thread: EmailThread, user: UserConfig) -> ClassificationResult: ...
     def summarize(self, thread: EmailThread) -> ThreadSummary: ...
     def extract(self, thread: EmailThread) -> list[ActionItem]: ...
-    def draft(self, thread: EmailThread, summary: ThreadSummary, user: UserConfig) -> DraftReply: ...
+    def draft(
+        self,
+        thread: EmailThread,
+        summary: ThreadSummary,
+        user: UserConfig,
+        *,
+        style: Optional[str] = None,
+        slack_context: Optional[str] = None,
+    ) -> DraftReply: ...
 
 
 class HeuristicLLM:
@@ -69,7 +77,15 @@ class HeuristicLLM:
                 items.append(ActionItem(text=s[:60], source_quote=s, kind="question"))
         return items[:5]
 
-    def draft(self, thread: EmailThread, summary: ThreadSummary, user: UserConfig) -> DraftReply:
+    def draft(
+        self,
+        thread: EmailThread,
+        summary: ThreadSummary,
+        user: UserConfig,
+        *,
+        style: Optional[str] = None,  # Heuristic は文体/文脈を使わない（テンプレ）。Protocol整合のため受理。
+        slack_context: Optional[str] = None,
+    ) -> DraftReply:
         cls = self.classify(thread, user)
         level = self._keigo_level(cls.category, user)
         sender_name = thread.sender or "ご担当者"

@@ -109,14 +109,24 @@ class AnthropicLLM:
                 continue  # 締切に source_quote が無い等（捏造）は構造的に弾く
         return out
 
-    def draft(self, thread: EmailThread, summary: ThreadSummary, user: UserConfig) -> DraftReply:
+    def draft(
+        self,
+        thread: EmailThread,
+        summary: ThreadSummary,
+        user: UserConfig,
+        *,
+        style: Optional[str] = None,
+        slack_context: Optional[str] = None,
+    ) -> DraftReply:
         msg = self._client.messages.create(
             model=self._models["draft"],
             max_tokens=2048,
             system=prompts.DRAFT_SYSTEM,
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
-            messages=[{"role": "user", "content": prompts.draft_user_prompt(thread, summary, user)}],
+            messages=[{"role": "user", "content": prompts.draft_user_prompt(
+                thread, summary, user, style=style, slack_context=slack_context
+            )}],
         )
         body = "".join(
             getattr(b, "text", "") for b in msg.content if getattr(b, "type", None) == "text"

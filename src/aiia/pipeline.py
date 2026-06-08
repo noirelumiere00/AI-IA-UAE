@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -44,6 +45,9 @@ class PipelineDeps:
     audit: Optional[AuditLog] = None
     dry_run: bool = True
     now: Optional[datetime] = None  # テスト決定性用（未指定なら現在時刻）
+    # M3: 文体プロファイル(本人)・関連Slack文脈(スレッド毎)。未指定なら従来どおり素のdraft。
+    style_provider: Optional[Callable[[UserConfig], Optional[str]]] = None
+    grounding_provider: Optional[Callable[[EmailThread], Optional[str]]] = None
 
 
 def _fetch_threads(deps: PipelineDeps) -> list[EmailThread]:
@@ -126,7 +130,9 @@ def run(deps: PipelineDeps) -> AgentResult:
             draft: Optional[DraftReply] = None
             draft_id: Optional[str] = None
             if cls.category.value in draft_cats and not thread.has_existing_draft:
-                d = deps.llm.draft(thread, summary, deps.user)
+                style = deps.style_provider(deps.user) if deps.style_provider else None
+                slack_ctx = deps.grounding_provider(thread) if deps.grounding_provider else None
+                d = deps.llm.draft(thread, summary, deps.user, style=style, slack_context=slack_ctx)
                 secrets = find_secrets(d.body)
                 if secrets:
                     d = d.model_copy(update={"body": redact(d.body)})

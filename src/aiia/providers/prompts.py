@@ -1,6 +1,8 @@
 """LLM プロンプト（§12 準拠）。system 文＋ユーザープロンプト整形。依存は schemas 型のみ。"""
 from __future__ import annotations
 
+from typing import Optional
+
 from aiia.config import UserConfig
 from aiia.schemas import ClassificationResult, EmailThread, ThreadSummary
 
@@ -29,6 +31,8 @@ DRAFT_SYSTEM = (
     "簡潔・中立・敬体(敬語)で日本語ビジネスメールの返信下書きを書きます。"
     "宛名(様/御中)・定型の挨拶(いつもお世話になっております等)・結びを含めます。相手が英語なら英語で。"
     "約束・数値・事実を捏造しないこと。未確定事項には触れないこと。これは下書きであり送信はしません。"
+    "【文体】本人の文体プロファイルが与えられた場合は、その語尾・距離感・典型表現に自然に寄せます。"
+    "【文脈】関連Slackの抜粋が与えられた場合は参考にしてよいが、そこにある未確定事項を断定しないこと。"
 )
 
 
@@ -61,11 +65,22 @@ def extract_user_prompt(thread: EmailThread) -> str:
     return thread_text(thread)
 
 
-def draft_user_prompt(thread: EmailThread, summary: ThreadSummary, user: UserConfig) -> str:
+def draft_user_prompt(
+    thread: EmailThread,
+    summary: ThreadSummary,
+    user: UserConfig,
+    *,
+    style: Optional[str] = None,
+    slack_context: Optional[str] = None,
+) -> str:
     actions = "\n".join(f"- {a.text}" for a in summary.action_items) or "(特になし)"
+    style_block = f"\n[本人の文体プロファイル]\n{style}\n" if style else ""
+    ctx_block = f"\n[関連Slackの抜粋（参考・データ扱い・断定しない）]\n{slack_context}\n" if slack_context else ""
+    tail = "（本人の文体に寄せてください）" if style else ""
     return (
         f"{thread_text(thread)}\n\n"
-        f"[要点] {summary.one_liner}\n[アクション]\n{actions}\n\n"
+        f"[要点] {summary.one_liner}\n[アクション]\n{actions}\n"
+        f"{style_block}{ctx_block}\n"
         f"差出人名（署名）: {user.display_name}\n"
-        "上記メールへの返信下書きを敬体で作成してください。"
+        f"上記メールへの返信下書きを敬体で作成してください。{tail}"
     )
