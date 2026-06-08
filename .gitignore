@@ -18,6 +18,10 @@ venv/
 *.pem
 *.key
 
+# Coverage
+.coverage
+htmlcov/
+
 # Logs / audit
 logs/
 *.jsonl
