@@ -5,6 +5,7 @@ PK=user_email(HASH) / thread_id(RANGE)。**論理削除**（status）で誤解�
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Protocol
@@ -65,7 +66,10 @@ class DynamoDbReminderStore:
         if self._client is None:
             import boto3  # 遅延 import
 
-            self._client = boto3.client("dynamodb", region_name=self._region)
+            # region: 明示指定 → AWS_REGION env → 東京。botocore は AWS_REGION を
+            # 既定セッションで拾わないことがあり、未指定だと us-east-1 等にズレてテーブル不在になるため明示。
+            region = self._region or os.environ.get("AWS_REGION") or "ap-northeast-1"
+            self._client = boto3.client("dynamodb", region_name=region)
         return self._client
 
     def _to_item(self, r: ReminderRecord) -> dict:
