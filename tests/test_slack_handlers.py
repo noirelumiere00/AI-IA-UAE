@@ -11,9 +11,13 @@ from aiia.runtime.slack_handlers import (
     HandlerDeps,
     handle_delete,
     handle_edit_submit,
+    handle_remind_dismiss,
+    handle_remind_snooze,
+    handle_remind_undo,
     handle_send_submit,
 )
 from aiia.safety.hitl import AutoSendError, SendConfirmationGate
+from aiia.state.reminder_store import InMemoryReminderStore
 
 
 class FakeSenderSvc:
@@ -94,3 +98,28 @@ def test_send_nonce_single_use_blocks_double() -> None:
     with pytest.raises(AutoSendError):
         handle_send_submit(deps, slack_user_id="U1", draft_id="d1")  # nonce 使い回し→拒否
     assert svc.calls == ["send"]  # 送信は1回だけ
+
+
+def _remind_deps() -> tuple[HandlerDeps, InMemoryReminderStore]:
+    from aiia import reminder
+    from datetime import datetime, timezone
+    rstore = InMemoryReminderStore()
+    reminder.track(rstore, "alice@x.com", "t1", "CLIENT_NORMAL", datetime.now(timezone.utc))
+    deps, _ = _deps()
+    deps.reminder_store = rstore
+    return deps, rstore
+
+
+def test_remind_dismiss_then_undo() -> None:
+    deps, rstore = _remind_deps()
+    assert "対応済み" in handle_remind_dismiss(deps, slack_user_id="U1", thread_id="t1")
+    assert rstore.get("alice@x.com", "t1").status == "dismissed"
+    assert "取り消し" in handle_remind_undo(deps, slack_user_id="U1", thread_id="t1")
+    assert rstore.get("alice@x.com", "t1").status == "active"  # 誤解除をundoで復活
+
+
+def test_remind_snooze_increments() -> None:
+    deps, rstore = _remind_deps()
+    handle_remind_snooze(deps, slack_user_id="U1", thread_id="t1")
+    r = rstore.get("alice@x.com", "t1")
+    assert r.snooze_count == 1 and r.snooze_until is not None

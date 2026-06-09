@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from aiia import triage
 from aiia.config import MorningEmailConfig, UserConfig
@@ -61,6 +61,8 @@ class PipelineDeps:
     grounding_provider: Optional[Callable[[EmailThread], Optional[str]]] = None
     # M1 hardening: per-user/日 のコスト上限（LLMが cost_usd を持つ場合に超過で draft をスキップ）。
     max_budget_usd: Optional[float] = None
+    # Phase2: 返信リマインド state（指定時のみ計算。dry_run は状態を変えない）。
+    reminder_store: Optional[Any] = None
 
 
 def _fetch_today_events(deps: PipelineDeps) -> tuple[list[CalendarEvent], bool]:
@@ -80,6 +82,24 @@ def _fetch_today_events(deps: PipelineDeps) -> tuple[list[CalendarEvent], bool]:
     else:
         events = [e.model_copy(update={"title": redact(e.title)}) for e in events]
     return events, False
+
+
+def _compute_reminders(
+    deps: PipelineDeps, items: list[DigestItem], threads: list[EmailThread], now: datetime
+) -> list:
+    """返信リマインドを計算（reminder_store 指定時のみ）。dry_run は状態を変えない。fail-safe。"""
+    store = deps.reminder_store
+    if store is None:
+        return []
+    from aiia import reminder as _reminder
+    try:
+        return _reminder.compute_reminders(
+            store, gmail=deps.tools.gmail, user_email=deps.user.user_id,
+            today_items=items, threads_by_id={t.thread_id: t for t in threads},
+            now=now, write=not deps.dry_run,
+        )
+    except Exception:  # noqa: BLE001 — リマインド失敗でメール本処理は止めない
+        return []
 
 
 def _fetch_threads(deps: PipelineDeps) -> list[EmailThread]:
@@ -217,12 +237,14 @@ def run(deps: PipelineDeps) -> AgentResult:
             items.append(_failed_item(thread))
 
     items.sort(key=lambda it: it.priority)
+    reminders = _compute_reminders(deps, items, threads, now)
     digest = Digest(
         generated_at=now,
         user_id=deps.user.user_id,
         items=items,
         counts_by_category=counts,
         quiet_counts=quiet_counts,
+        reminders=reminders,
         calendar_events=calendar_events,
         calendar_failed=calendar_failed,
         processed=len(threads),

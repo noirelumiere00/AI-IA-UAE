@@ -24,6 +24,32 @@ ACTION_DELETE = "aiia_delete_item"
 ACTION_SEND = "aiia_send_reply"
 _ITEM_BLOCK_PREFIX = "aiia_item_"
 
+# 返信リマインドの操作（value=thread_id）。解除は confirm 無し＝直後にundoで取り消せる設計。
+ACTION_REMIND_REPLY = "aiia_remind_reply"
+ACTION_REMIND_DISMISS = "aiia_remind_dismiss"
+ACTION_REMIND_SNOOZE = "aiia_remind_snooze"
+ACTION_REMIND_MUTE = "aiia_remind_mute"
+ACTION_REMIND_UNDO = "aiia_remind_undo"
+_REMIND_BLOCK_PREFIX = "aiia_remind_"
+
+
+def _reminder_actions(thread_id: str) -> dict:
+    """未返信リマインドの操作ボタン[対応する / 対応済み・解除 / 後で]＋overflow(もう通知しない)。"""
+    return {
+        "type": "actions",
+        "block_id": f"{_REMIND_BLOCK_PREFIX}{thread_id}",
+        "elements": [
+            {"type": "button", "action_id": ACTION_REMIND_REPLY, "style": "primary",
+             "text": {"type": "plain_text", "text": "✏️ 対応する"}, "value": thread_id},
+            {"type": "button", "action_id": ACTION_REMIND_DISMISS,
+             "text": {"type": "plain_text", "text": "✅ 対応済み・解除"}, "value": thread_id},
+            {"type": "button", "action_id": ACTION_REMIND_SNOOZE,
+             "text": {"type": "plain_text", "text": "⏰ 後で"}, "value": thread_id},
+            {"type": "overflow", "action_id": ACTION_REMIND_MUTE,
+             "options": [{"text": {"type": "plain_text", "text": "🔕 もう通知しない"}, "value": thread_id}]},
+        ],
+    }
+
 
 def _item_actions(value: str) -> dict:
     """各メール項目の操作ボタン。value は Gmail下書きID(無ければthread_id)＝M2ハンドラが対象特定に使う。
@@ -117,6 +143,8 @@ def _calendar_lines(d: Digest) -> list[str]:
 
 def _decision_summary(d: Digest, to_items: list[DigestItem], cc_items: list[DigestItem]) -> str:
     bits = []
+    if d.reminders:
+        bits.append(f"🔔 未返信 {len(d.reminders)}")
     if to_items:
         bits.append(f"📥 要対応 {len(to_items)}")
     if d.calendar_events or d.calendar_failed:
@@ -127,6 +155,22 @@ def _decision_summary(d: Digest, to_items: list[DigestItem], cc_items: list[Dige
     return " ・ ".join(bits) or f"{d.processed}件処理"
 
 
+def _remind_when(v) -> str:  # type: ignore[no-untyped-def]
+    fs = v.first_seen.astimezone(_JST) if v.first_seen else None
+    head = f"{fs.month}/{fs.day}・" if fs else ""
+    return f"{head}{v.business_days}営業日未返信"
+
+
+def _reminder_lines(d: Digest) -> list[str]:
+    out: list[str] = []
+    for v in d.reminders:
+        out.append(f"  📨 {v.sender} ・ {v.subject}")
+        out.append(f"     💬 {_remind_when(v)}" + (f" / {v.snippet}" if v.snippet else ""))
+        if v.gmail_link:
+            out.append(f"     ↗ {v.gmail_link}")
+    return out
+
+
 # ── テキスト（dry-run）─────────────────────────────────────────────────────
 def render_digest_text(d: Digest) -> str:
     to_items, cc_items = _split_to_cc(d.items)
@@ -134,11 +178,14 @@ def render_digest_text(d: Digest) -> str:
         f"📬 朝のダイジェスト — {_date_label(d)}",
         _decision_summary(d, to_items, cc_items),
     ]
+    if d.reminders:
+        lines.append("\n━━ 🔔 未返信リマインド ━━")
+        lines.extend(_reminder_lines(d))
     if _has_calendar(d):
         lines.append("")
         lines.extend(_calendar_lines(d))
     if not d.items and not d.quiet_counts:
-        lines.append("\n☕ 新着の未読メールはありません。" if _has_calendar(d)
+        lines.append("\n☕ 新着の未読メールはありません。" if (_has_calendar(d) or d.reminders)
                      else "\n☕ 静かな朝です — 新着の未読メールはありません。")
         return "\n".join(lines)
 
@@ -189,7 +236,7 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
         {"type": "header", "text": {"type": "plain_text", "text": f"📬 朝のダイジェスト — {_date_label(d)}"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text": _decision_summary(d, to_items, cc_items)}]},
     ]
-    if not d.items and not d.quiet_counts and not _has_calendar(d):
+    if not d.items and not d.quiet_counts and not _has_calendar(d) and not d.reminders:
         blocks.append(_section("☕ *静かな朝です* — 新着の未読メールはありません。"))
         return blocks
 
@@ -225,7 +272,20 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
                 if interactive and it.draft and len(blocks) < _MAX_BLOCKS - 2:
                     blocks.append(_item_actions(it.gmail_draft_id or it.thread_id))
 
-    # 1) 📥 あなた宛(To)＝最優先・予算先取り
+    # 0) 🔔 未返信リマインド＝最上段・最優先（予算を真っ先に確保）
+    if d.reminders:
+        blocks.append(_section("*🔔 未返信リマインド*"))
+        for v in d.reminders:
+            if len(blocks) >= _MAX_BLOCKS - 2:
+                truncated += 1
+                continue
+            link = f"\n<{v.gmail_link}|↗ Gmailで開く>" if v.gmail_link else ""
+            snip = f"\n{v.snippet}" if v.snippet else ""
+            blocks.append(_section(f"📨 *{v.sender}*\n件名: {v.subject}\n💬 {_remind_when(v)}{snip}{link}"))
+            if interactive and len(blocks) < _MAX_BLOCKS - 2:
+                blocks.append(_reminder_actions(v.thread_id))
+
+    # 1) 📥 あなた宛(To)＝予算先取り
     _emit_blocks(to_items, "*📥 あなた宛（To・要対応）*")
     # 2) 📅 今日の予定＝常に1ブロック（予算が無ければ出さない＝Toを潰さない）
     if _has_calendar(d) and len(blocks) < _MAX_BLOCKS - 2:

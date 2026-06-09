@@ -44,6 +44,7 @@ def run_for_all_users(
     channel_map: Optional[dict[str, str]] = None,  # client名→Slack channel_id（grounding）
     max_budget_usd: Optional[float] = None,  # per-user/日 のコスト上限
     personalize: bool = True,  # M3: 文体/grounding を有効化（LLMがsummarize_text対応かつslackありの時）
+    reminder_store: Any = None,  # Phase2: 返信リマインド state（指定時のみ計算）
 ) -> list[UserResult]:
     platform = platform or load_platform(config_dir)
     agent = load_agent_config("morning_email", config_dir)
@@ -88,7 +89,7 @@ def run_for_all_users(
                     llm=llm, tools=tools, user=ucfg, agent=agent,
                     audit=AuditLog(email), dry_run=dry_run,
                     style_provider=style_provider, grounding_provider=grounding_provider,
-                    max_budget_usd=max_budget_usd,
+                    max_budget_usd=max_budget_usd, reminder_store=reminder_store,
                 )
             )
             delivered = False

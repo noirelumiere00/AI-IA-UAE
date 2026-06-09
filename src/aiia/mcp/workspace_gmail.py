@@ -19,7 +19,8 @@ from aiia.mcp.workspace_calendar import WorkspaceCalendar
 from aiia.mcp.registry import LABEL_PREFIX
 from aiia.schemas import EmailMessage, EmailThread
 
-_META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Id", "Precedence"]
+_META_HEADERS = ["From", "To", "Cc", "Subject", "Date",
+                 "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted"]
 
 
 def _header(headers: list[dict], name: str) -> str:
@@ -92,6 +93,7 @@ class WorkspaceGmail:
                     snippet=snippet,
                     body_text=snippet,  # metadata 取得＝本文はsnippet（軽量・privacy）。M3でfull化
                     headers={h["name"]: h["value"] for h in headers if "name" in h},
+                    labels=list(m.get("labelIds", [])),  # SENT 等（未返信判定に使う）
                 )
             )
         return EmailThread(thread_id=thread_id, subject=subject, messages=msgs)

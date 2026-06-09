@@ -52,8 +52,10 @@ print('連携済み:', DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher
   batch)
     $PY -c "import os;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
 from aiia.adapters.slack_client import SlackDelivery;from aiia.orchestrator.multi import run_for_all_users;\
+from aiia.state.reminder_store import DynamoDbReminderStore;\
 store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID']));\
-[print(r) for r in run_for_all_users(store=store, slack=SlackDelivery(), dry_run=False, max_budget_usd=1.0)]"
+rstore=DynamoDbReminderStore(os.environ.get('AIIA_REMINDER_TABLE','aiia-reminder-state'));\
+[print(r) for r in run_for_all_users(store=store, slack=SlackDelivery(), dry_run=False, max_budget_usd=1.0, reminder_store=rstore)]"
     ;;
   serve)
     $PY -m aiia.runtime.slack_app

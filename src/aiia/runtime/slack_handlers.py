@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from aiia import reminder as _reminder
 from aiia.auth.token_store import OAuthToken, TokenStore
 from aiia.mcp.workspace_gmail import WorkspaceGmailSender
 from aiia.safety.hitl import SendConfirmationGate
@@ -23,6 +25,7 @@ class HandlerDeps:
     now: Callable[[], float]
     nonce: Callable[[], str]
     audit: Any = None  # AuditLog | None
+    reminder_store: Any = None  # ReminderStore | None（リマインド操作用）
 
 
 def _resolve(deps: HandlerDeps, slack_user_id: str) -> tuple[str, OAuthToken]:
@@ -65,3 +68,46 @@ def handle_send_submit(deps: HandlerDeps, *, slack_user_id: str, draft_id: str) 
     if deps.audit:
         deps.audit.record("mail_sent", draft_id=draft_id, message_id=message_id)
     return f"📤 送信しました（{message_id}）。"
+
+
+# ── 返信リマインドの操作（state は論理削除＝undo可。解除に confirm を付けない）──────
+def _remind_email(deps: HandlerDeps, slack_user_id: str) -> str:
+    email = deps.email_for_slack_user(slack_user_id)
+    if not email:
+        raise PermissionError("Slackユーザーのメール解決に失敗（users:read.email 権限が必要）")
+    if deps.reminder_store is None:
+        raise RuntimeError("reminder_store 未設定")
+    return email
+
+
+def handle_remind_dismiss(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
+    email = _remind_email(deps, slack_user_id)
+    _reminder.dismiss(deps.reminder_store, email, thread_id, datetime.now(timezone.utc))
+    if deps.audit:
+        deps.audit.record("remind_dismissed", thread_id=thread_id)
+    return "✅ 対応済みにしました（誤りなら↩取り消すで戻せます）。"
+
+
+def handle_remind_mute(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
+    email = _remind_email(deps, slack_user_id)
+    _reminder.dismiss(deps.reminder_store, email, thread_id, datetime.now(timezone.utc), mute=True)
+    return "🔕 このスレッドは今後通知しません（↩取り消すで戻せます）。"
+
+
+def handle_remind_snooze(deps: HandlerDeps, *, slack_user_id: str, thread_id: str, days: int = 3) -> str:
+    email = _remind_email(deps, slack_user_id)
+    _reminder.snooze(deps.reminder_store, email, thread_id, datetime.now(timezone.utc), days=days)
+    return f"⏰ {days}日後に再通知します。"
+
+
+def handle_remind_undo(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
+    email = _remind_email(deps, slack_user_id)
+    _reminder.undo(deps.reminder_store, email, thread_id, datetime.now(timezone.utc))
+    return "↩ 取り消しました（リマインドを再開します）。"
+
+
+def handle_remind_reply(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
+    """v1: Gmail へ誘導（返信を検知したら自動解除）。下書き自動生成は後続。"""
+    _remind_email(deps, slack_user_id)  # 連携・権限チェック
+    return (f"✏️ こちらから返信してください: {_reminder.gmail_link(thread_id)}\n"
+            "（返信が検知されると自動で解除されます）")

@@ -14,12 +14,26 @@ from typing import Any, Optional
 
 from aiia.auth.oauth_flow import OAuthConsentFlow
 from aiia.auth.token_store import OAuthToken, TokenStore
-from aiia.delivery.slack import ACTION_DELETE, ACTION_EDIT, ACTION_SEND
+from aiia.delivery.slack import (
+    ACTION_DELETE,
+    ACTION_EDIT,
+    ACTION_REMIND_DISMISS,
+    ACTION_REMIND_MUTE,
+    ACTION_REMIND_REPLY,
+    ACTION_REMIND_SNOOZE,
+    ACTION_REMIND_UNDO,
+    ACTION_SEND,
+)
 from aiia.mcp.workspace_gmail import WorkspaceGmailSender
 from aiia.runtime.slack_handlers import (
     HandlerDeps,
     handle_delete,
     handle_edit_submit,
+    handle_remind_dismiss,
+    handle_remind_mute,
+    handle_remind_reply,
+    handle_remind_snooze,
+    handle_remind_undo,
     handle_send_submit,
 )
 from aiia.safety.hitl import SendConfirmationGate
@@ -29,7 +43,8 @@ SEND_VIEW = "aiia_send_submit"
 
 
 def build_handler_deps(
-    store: TokenStore, *, bot_token: Optional[str] = None, gate: Optional[SendConfirmationGate] = None
+    store: TokenStore, *, bot_token: Optional[str] = None,
+    gate: Optional[SendConfirmationGate] = None, reminder_store: Any = None,
 ) -> HandlerDeps:
     """本番用 HandlerDeps を構築（email解決は sync WebClient・送信器は本人トークンから）。"""
     from slack_sdk import WebClient
@@ -51,7 +66,16 @@ def build_handler_deps(
         sender_factory=lambda t: WorkspaceGmailSender(t),
         now=time.time,
         nonce=lambda: uuid.uuid4().hex,
+        reminder_store=reminder_store,
     )
+
+
+def _undo_blocks(thread_id: str, msg: str) -> list[dict]:
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": msg}},
+        {"type": "actions", "elements": [{"type": "button", "action_id": ACTION_REMIND_UNDO,
+            "text": {"type": "plain_text", "text": "↩ 取り消す"}, "value": thread_id}]},
+    ]
 
 
 def _edit_modal(draft_id: str, thread_id: str, subject: str, body: str) -> dict:
@@ -151,6 +175,43 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
         msg = await _run(lambda: handle_send_submit(deps, slack_user_id=uid, draft_id=draft_id))
         await client.chat_postMessage(channel=uid, text=msg)
 
+    # ── 返信リマインド ──────────────────────────────────────────────────────
+    @app.action(ACTION_REMIND_REPLY)
+    async def on_remind_reply(ack: Any, body: Any, respond: Any) -> None:
+        await ack()
+        tid, uid = body["actions"][0]["value"], body["user"]["id"]
+        msg = await _run(lambda: handle_remind_reply(deps, slack_user_id=uid, thread_id=tid))
+        await respond(response_type="ephemeral", text=msg)
+
+    @app.action(ACTION_REMIND_SNOOZE)
+    async def on_remind_snooze(ack: Any, body: Any, respond: Any) -> None:
+        await ack()
+        tid, uid = body["actions"][0]["value"], body["user"]["id"]
+        msg = await _run(lambda: handle_remind_snooze(deps, slack_user_id=uid, thread_id=tid))
+        await respond(response_type="ephemeral", text=msg)
+
+    @app.action(ACTION_REMIND_DISMISS)
+    async def on_remind_dismiss(ack: Any, body: Any, respond: Any) -> None:
+        await ack()
+        tid, uid = body["actions"][0]["value"], body["user"]["id"]
+        msg = await _run(lambda: handle_remind_dismiss(deps, slack_user_id=uid, thread_id=tid))
+        await respond(response_type="ephemeral", text=msg, blocks=_undo_blocks(tid, msg))
+
+    @app.action(ACTION_REMIND_MUTE)
+    async def on_remind_mute(ack: Any, body: Any, respond: Any) -> None:
+        await ack()  # overflow は selected_option.value に thread_id
+        tid = body["actions"][0]["selected_option"]["value"]
+        uid = body["user"]["id"]
+        msg = await _run(lambda: handle_remind_mute(deps, slack_user_id=uid, thread_id=tid))
+        await respond(response_type="ephemeral", text=msg, blocks=_undo_blocks(tid, msg))
+
+    @app.action(ACTION_REMIND_UNDO)
+    async def on_remind_undo(ack: Any, body: Any, respond: Any) -> None:
+        await ack()
+        tid, uid = body["actions"][0]["value"], body["user"]["id"]
+        msg = await _run(lambda: handle_remind_undo(deps, slack_user_id=uid, thread_id=tid))
+        await respond(response_type="ephemeral", text=msg)
+
     return app
 
 
@@ -194,9 +255,12 @@ def run() -> None:  # pragma: no cover - 常駐起動（live）
 
     from aiia.auth.token_store import DynamoDbTokenStore, KmsCipher
 
+    from aiia.state.reminder_store import DynamoDbReminderStore
+
     table = os.environ["AIIA_DDB_TABLE"]
     store = DynamoDbTokenStore(table, KmsCipher(os.environ["OAUTH_KMS_KEY_ID"]))
-    deps = build_handler_deps(store)
+    rstore = DynamoDbReminderStore(os.environ.get("AIIA_REMINDER_TABLE", "aiia-reminder-state"))
+    deps = build_handler_deps(store, reminder_store=rstore)
     app = create_app(deps, connect_redirect_uri=os.environ.get("OAUTH_REDIRECT_URI"))
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     asyncio.run(handler.start_async())
