@@ -24,11 +24,12 @@ def build_user_credentials(token: OAuthToken) -> Any:
 
     from google.oauth2.credentials import Credentials
 
+    # scopes は **渡さない**。refresh 時に scope= を送ると「付与外のscope要求」で invalid_scope に
+    # なり得る（保存メタと実際の付与がズレた場合）。refresh_token の付与内容を正とする＝堅牢。
     return Credentials(
         token=None,
         refresh_token=token.refresh_token,
         token_uri=_TOKEN_URI,
         client_id=cid,
         client_secret=sec,
-        scopes=list(token.scopes) or None,
     )
