@@ -27,6 +27,16 @@ class SlackDelivery:
             return str(resp["user"]["id"])
         return None
 
+    def display_name_for_email(self, email: str) -> Optional[str]:
+        """Slack profile の実名（本人名指し昇格に使う）。取得不可なら None。"""
+        resp = self._wc().users_lookupByEmail(email=email)
+        if resp.get("ok"):
+            u = resp["user"]
+            prof = u.get("profile", {}) or {}
+            name = prof.get("real_name_normalized") or prof.get("real_name") or u.get("real_name")
+            return str(name) if name else None
+        return None
+
     def open_dm(self, user_id: str) -> Optional[str]:
         resp = self._wc().conversations_open(users=user_id)
         if resp.get("ok"):

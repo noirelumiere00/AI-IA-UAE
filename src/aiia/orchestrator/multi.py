@@ -56,6 +56,16 @@ def run_for_all_users(
             if token is None:
                 return UserResult(email, ok=False, error="token_missing")
             ucfg = load_user(email, config_dir)  # config/users/<email>.yaml or 既定(user_id=email)
+            # display_name を Slack 実名で補完（本人名指し昇格に使用）。best-effort・失敗時は既定のまま。
+            if slack is not None and hasattr(slack, "display_name_for_email") and (
+                not ucfg.display_name or ucfg.display_name == "（ユーザー名）"
+            ):
+                try:
+                    dn = slack.display_name_for_email(email)
+                    if dn:
+                        ucfg.display_name = dn
+                except Exception:  # noqa: BLE001 — 補完失敗で本処理は止めない
+                    pass
             service = gmail_service_factory(email) if gmail_service_factory else None
             tools = WorkspaceGmailToolset.from_token(token, service=service)
             llm = build_llm(platform)

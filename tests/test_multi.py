@@ -41,6 +41,20 @@ def test_slack_delivery_user_not_found() -> None:
     assert SlackDelivery(client=_WC()).send_digest(email="a@x", blocks=[], text="t") is False
 
 
+def test_display_name_for_email() -> None:
+    class _WC:
+        def users_lookupByEmail(self, *, email: str) -> dict:
+            return {"ok": True, "user": {"id": "U1", "profile": {"real_name_normalized": "小俣翔碁"}}}
+
+    assert SlackDelivery(client=_WC()).display_name_for_email("s-komata@x") == "小俣翔碁"
+
+    class _WCNone:
+        def users_lookupByEmail(self, *, email: str) -> dict:
+            return {"ok": False}
+
+    assert SlackDelivery(client=_WCNone()).display_name_for_email("x@y") is None
+
+
 def _plat() -> PlatformConfig:
     return PlatformConfig(default_profile="heuristic")
 

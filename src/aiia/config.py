@@ -103,6 +103,9 @@ def load_user(user: Optional[str] = None, cdir: Optional[Path] = None) -> UserCo
     user = user or current_user()
     data = _read_yaml(cdir / "users" / f"{user}.yaml")
     cfg = UserConfig(**data) if data else UserConfig(user_id=user)
+    # 組織共通の社内ドメイン既定（per-user yaml 未指定時のみ）。全員同一orgの運用向け・env駆動。
+    if not cfg.internal_domain and os.environ.get("AIIA_DEFAULT_INTERNAL_DOMAIN"):
+        cfg.internal_domain = os.environ["AIIA_DEFAULT_INTERNAL_DOMAIN"]
     if os.environ.get("SLACK_DELIVERY_USER_ID"):
         cfg.slack_user_id = os.environ["SLACK_DELIVERY_USER_ID"]
     return cfg

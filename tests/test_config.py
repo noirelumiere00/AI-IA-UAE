@@ -28,3 +28,17 @@ def test_load_user() -> None:
 def test_load_user_missing_uses_default() -> None:
     u = load_user("no_such_user", CONFIG_DIR)
     assert u.user_id == "no_such_user"  # yaml が無くても id を保持
+
+
+def test_load_user_org_default_internal_domain(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # yaml 無しユーザーでも env で社内ドメインを補完（全員同一org運用）
+    monkeypatch.setenv("AIIA_DEFAULT_INTERNAL_DOMAIN", "vectorinc.co.jp")
+    u = load_user("s-komata@vectorinc.co.jp", CONFIG_DIR)
+    assert u.internal_domain == "vectorinc.co.jp"
+
+
+def test_load_user_yaml_internal_domain_wins(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # per-user yaml の internal_domain は env 既定より優先
+    monkeypatch.setenv("AIIA_DEFAULT_INTERNAL_DOMAIN", "vectorinc.co.jp")
+    u = load_user("example_user", CONFIG_DIR)  # yaml で newstv.co.jp 指定済
+    assert u.internal_domain == "newstv.co.jp"
