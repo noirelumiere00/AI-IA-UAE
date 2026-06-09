@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from aiia.auth.token_store import OAuthToken
-from aiia.delivery.slack import _calendar_full_lines, _next_event_str, render_slack_blocks
+from aiia.delivery.slack import _calendar_full_lines, render_slack_blocks
 from aiia.mcp.workspace_calendar import parse_event, today_bounds
 from aiia.schemas import CalendarEvent, Digest
 
@@ -72,23 +72,18 @@ def test_calendar_full_lines_failed_vs_empty_distinct() -> None:
     assert "なし" in "\n".join(_calendar_full_lines(_digest([])))
 
 
-def test_next_event_str_highlight() -> None:
-    d = _digest([
-        CalendarEvent(event_id="a", title="終日休暇", all_day=True, start=datetime(2026, 6, 9, tzinfo=JST)),
-        CalendarEvent(event_id="b", title="商談",
-                      start=datetime(2026, 6, 9, 10, 0, tzinfo=JST), end=datetime(2026, 6, 9, 11, 0, tzinfo=JST)),
-    ])
-    assert "⏭ 次 10:00 商談（あと2時間" in (_next_event_str(d) or "")  # サマリ用1行
-
-
-def test_calendar_full_lines_allday_and_needsaction() -> None:
+def test_calendar_full_lines_vertical_time_left() -> None:
+    # 時刻が左(等幅)・予定が右・1件ごとに改行（縦リスト）
     d = _digest([
         CalendarEvent(event_id="a", title="終日休暇", all_day=True, start=datetime(2026, 6, 9, tzinfo=JST)),
         CalendarEvent(event_id="b", title="商談", response_status="needsAction",
                       start=datetime(2026, 6, 9, 10, 0, tzinfo=JST)),
+        CalendarEvent(event_id="c", title="定例", start=datetime(2026, 6, 9, 14, 0, tzinfo=JST)),
     ])
-    txt = "\n".join(_calendar_full_lines(d))
-    assert "🗓 終日: 終日休暇" in txt and "❓" in txt
+    out = _calendar_full_lines(d)
+    assert "`10:00`　商談 ❓未応答" in out      # 時刻左(コードスパン)＋全角space＋予定右
+    assert "`14:00`　定例" in out               # 1件1行（縦並び）
+    assert "🗓 終日: 終日休暇" in "\n".join(out)
 
 
 def test_calendar_full_lines_folds_over_max() -> None:

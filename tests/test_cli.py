@@ -15,5 +15,5 @@ def test_cli_dry_run_prints_digest(
     rc = main(["--user", "example_user"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "朝のダイジェスト" in out
+    assert "メールサマリー" in out
     assert "dry_run=True" in out

@@ -11,7 +11,14 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from aiia.schemas import CATEGORY_EMOJI, Digest, DigestItem
+from aiia.schemas import CATEGORY_EMOJI, Category, Digest, DigestItem
+
+# カテゴリの短い日本語ラベル（色絵文字だけだと意味不明なので併記して戻す）
+_CAT_LABEL = {
+    Category.CLIENT_URGENT: "顧客・緊急", Category.CLIENT_NORMAL: "顧客",
+    Category.PRESS_MEDIA: "プレス", Category.FINANCE_LEGAL: "金額・法務",
+    Category.VENDOR_PARTNER: "取引先", Category.INTERNAL: "社内", Category.NEWSLETTER: "一般",
+}
 
 _MAX_BLOCKS = 49
 _MAX_TEXT = 2900
@@ -119,57 +126,28 @@ def _has_calendar(d: Digest) -> bool:
     return bool(d.calendar_events) or d.calendar_failed
 
 
-def _next_event_str(d: Digest) -> Optional[str]:
-    """サマリ用「次の予定1行」。次の時刻つき予定が無ければ None。"""
-    if d.calendar_failed or not d.calendar_events:
-        return None
-    timed = sorted((e for e in d.calendar_events if not e.all_day and e.start), key=lambda e: e.start.timestamp() if e.start else 0.0)
-    nxt = next((e for e in timed if e.start and e.start >= d.generated_at), None)
-    if not (nxt and nxt.start):
-        return None
-    mins = max(0, int((nxt.start - d.generated_at).total_seconds() // 60))
-    h, m = divmod(mins, 60)
-    when = f"あと{h}時間{m}分" if h and m else f"あと{h}時間" if h else f"あと{m}分"
-    return f"⏭ 次 {_fmt_t(nxt.start)} {_ev_title(nxt)}（{when}）"
-
-
 def _calendar_full_lines(d: Digest) -> list[str]:
-    """下部のフル予定（終日1行＋時刻リスト1行・コンパクト）。0件/失敗を区別。"""
+    """今日の予定（時刻=左・予定=右・1件ごとに改行の縦リスト）。終日は別行。0件/失敗を区別。"""
     if d.calendar_failed:
         return ["📅 *今日の予定* — ⚠️ 取得できませんでした"]
     evs = d.calendar_events
     if not evs:
         return ["📅 *今日の予定* — なし"]
-    timed = sorted((e for e in evs if not e.all_day and e.start), key=lambda e: e.start.timestamp() if e.start else 0.0)
+    timed = sorted((e for e in evs if not e.all_day and e.start),
+                   key=lambda e: e.start.timestamp() if e.start else 0.0)
     allday = [e for e in evs if e.all_day]
     out = [f"📅 *今日の予定*（{len(evs)}件）"]
+    for e in timed[:_CAL_LIST_MAX]:
+        mark = " ❓未応答" if e.response_status == "needsAction" else ""
+        out.append(f"`{_fmt_t(e.start)}`　{_ev_title(e)}{mark}")  # 時刻(左・等幅)＋全角space＋予定(右)
+    if len(timed) > _CAL_LIST_MAX:
+        out.append(f"`     `　ほか{len(timed) - _CAL_LIST_MAX}件")
     if allday:
         out.append("🗓 終日: " + " ・ ".join(_ev_title(e) for e in allday))
-    shown = timed[:_CAL_LIST_MAX]
-    if shown:
-        out.append(" ・ ".join(
-            f"{_fmt_t(e.start)} {_ev_title(e)}" + (" ❓" if e.response_status == "needsAction" else "")
-            for e in shown))
-    if len(timed) > _CAL_LIST_MAX:
-        out.append(f"ほか{len(timed) - _CAL_LIST_MAX}件")
     return out
 
 
-# ── サマリ / 各項目 ───────────────────────────────────────────────────────────
-def _decision_summary(d: Digest, to_items: list[DigestItem]) -> str:
-    bits = []
-    if d.reminders:
-        bits.append(f"🔔 未返信 {len(d.reminders)}")
-    if to_items:
-        bits.append(f"📥 要対応 {len(to_items)}")
-    nxt = _next_event_str(d)
-    if nxt:
-        bits.append(nxt)
-    elif d.calendar_failed:
-        bits.append("📅 予定 取得不可")
-    return " ・ ".join(bits) or f"{d.processed}件確認"
-
-
+# ── 各項目 ────────────────────────────────────────────────────────────────────
 def _misc_line(d: Digest, cc_items: list[DigestItem]) -> Optional[str]:
     parts = []
     if cc_items:
@@ -192,12 +170,22 @@ def _reminder_line(v: Any) -> str:
     return f"{emoji} {_sender_link(v)} {v.subject} — {_remind_when(v)}"
 
 
+def _subject_link(it: DigestItem) -> str:
+    subj = (it.subject or "(件名なし)").replace("|", "/").replace(">", "")
+    return f"<{it.gmail_link}|{subj}>" if it.gmail_link else subj
+
+
 def _item_text(it: DigestItem) -> str:
-    """要対応メール：色 *送信者(リンク)* 件名 [📝⏰⚠️] ＋ 要約(平文)。カテゴリ見出し・ラベルなし。"""
-    icons = ("" + (" 📝" if it.draft else "") + (" ⏰" if _has_deadline(it) else "")
-             + (" ⚠️" if it.needs_review else ""))
-    head = f"{CATEGORY_EMOJI[it.category]} *{_sender_link(it)}* {it.subject}{icons}"
-    return head + (f"\n{it.summary.one_liner}" if it.summary.one_liner else "")
+    """要対応メール（3行）：色 *送信者*（カテゴリ語）アイコン / 件名(リンク) / 要約。
+    カテゴリは色＋日本語語で意味を補う。件名をGmailリンクにして導線を明示。"""
+    icons = ("" + (" 📝下書き" if it.draft else "") + (" ⏰締切" if _has_deadline(it) else "")
+             + (" ⚠️要確認" if it.needs_review else ""))
+    cat = _CAT_LABEL.get(it.category, it.category.value)
+    lines = [f"{CATEGORY_EMOJI[it.category]} *{_short_sender(it.sender)}*（{cat}）{icons}",
+             _subject_link(it)]
+    if it.summary.one_liner:
+        lines.append(it.summary.one_liner)
+    return "\n".join(lines)
 
 
 def _sorted(items: list[DigestItem]) -> list[DigestItem]:
@@ -207,7 +195,7 @@ def _sorted(items: list[DigestItem]) -> list[DigestItem]:
 # ── テキスト（dry-run）─────────────────────────────────────────────────────────
 def render_digest_text(d: Digest) -> str:
     to_items, cc_items = _split_to_cc(d.items)
-    lines = [f"📬 朝のダイジェスト — {_date_label(d)}", _decision_summary(d, to_items)]
+    lines = [f"📬 メールサマリー — {_date_label(d)}"]
     empty = not d.items and not d.quiet_counts and not _has_calendar(d) and not d.reminders
     if empty:
         lines.append("\n☕ 今日は静かです。")
@@ -216,7 +204,7 @@ def render_digest_text(d: Digest) -> str:
         lines.append("\n🔔 未返信 ― 今日中に")
         lines.extend(f"  {_reminder_line(v)}" for v in d.reminders)
     if to_items:
-        lines.append(f"\n📥 今日やること（{len(to_items)}）")
+        lines.append(f"\n✉️ 要対応メール（{len(to_items)}）")
         for it in _sorted(to_items)[:_TO_TOP]:
             for ln in _item_text(it).split("\n"):
                 lines.append(f"  {ln}")
@@ -246,8 +234,7 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
     """Slack Block Kit。引き算レイアウト・≤49ブロック。リマインド/To を先に積んで予算確保。"""
     to_items, cc_items = _split_to_cc(d.items)
     blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"📬 朝のダイジェスト — {_date_label(d)}"}},
-        _ctx(_decision_summary(d, to_items)),
+        {"type": "header", "text": {"type": "plain_text", "text": f"📬 メールサマリー — {_date_label(d)}"}},
     ]
     if not d.items and not d.quiet_counts and not _has_calendar(d) and not d.reminders:
         blocks.append(_section("☕ *今日は静かです* — 新着の未読メールはありません。"))
@@ -269,9 +256,9 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
             if interactive and _room():
                 blocks.append(_reminder_actions(v.thread_id))
 
-    # 📥 今日やること（Top5・カテゴリ見出し無し・色は行頭）
+    # ✉️ 要対応メール（Top5・カテゴリ見出し無し・色＋カテゴリ語を各行に）
     if to_items:
-        blocks.append(_section("*📥 今日やること*"))
+        blocks.append(_section("*✉️ 要対応メール*"))
         for it in _sorted(to_items)[:_TO_TOP]:
             if not _room():
                 truncated += 1
