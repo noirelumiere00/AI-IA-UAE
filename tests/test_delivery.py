@@ -15,8 +15,9 @@ def test_text_has_header_categories_and_unsent(
 ) -> None:
     txt = render_digest_text(run(make_deps(tools, dry_run=True)).digest)
     assert "朝のダイジェスト" in txt
-    assert "🔴 CLIENT_URGENT" in txt
-    assert "未送信" in txt  # 下書きは未送信である旨
+    assert "📥 今日やること" in txt and "🔴" in txt  # カテゴリ見出し廃止・色は行頭
+    assert "CLIENT_URGENT (" not in txt              # カテゴリ見出しは出さない
+    assert "未送信" in txt                            # 下書きがあるので未送信注意
 
 
 def test_blocks_within_limit_and_header(
@@ -30,9 +31,9 @@ def test_blocks_within_limit_and_header(
 
 def test_empty_digest_quiet_morning() -> None:
     d = Digest(generated_at=datetime(2026, 6, 8, 7, 0, tzinfo=timezone.utc), user_id="t")
-    assert "静かな朝" in render_digest_text(d)
+    assert "今日は静かです" in render_digest_text(d)
     blocks = render_slack_blocks(d)
-    assert any("静かな朝" in str(b) for b in blocks)
+    assert any("静かです" in str(b) for b in blocks)
 
 
 def test_interactive_buttons_on_draft_items(
@@ -77,23 +78,20 @@ def test_split_to_cc_promotes_actionable_cc() -> None:
     assert {id(x) for x in to} == {id(to_only), id(cc_act), id(unknown)}  # 要返信Cc/不明はTo側
 
 
-def test_text_separates_to_and_cc_groups() -> None:
+def test_to_shown_and_cc_collapsed_to_count() -> None:
+    # 引き算後：To は「今日やること」に個別、CC は件数1行に畳む
     d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
-               items=[_ditem("to"), _ditem("cc")])
+               items=[_ditem("to"), _ditem("cc"), _ditem("cc")])
     txt = render_digest_text(d)
-    assert "あなた宛（To" in txt and "CC（情報共有" in txt
+    assert "📥 今日やること" in txt
+    assert "👥 CC 2" in txt  # CcはグループでなくCC件数に
 
 
-def test_block_budget_protects_to_over_calendar() -> None:
-    # Toを大量に積んでも≤49・To見出しは残り、カレンダーは予算切れで degrade（出ない）する
-    from aiia.schemas import CalendarEvent
+def test_to_top5_fold_within_limit() -> None:
+    # 引き算後：要対応はTop5まで個別、超過は「省略」に畳む。≤49を維持。
     many_to = [_ditem("to") for _ in range(60)]
-    d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
-               items=many_to,
-               calendar_events=[CalendarEvent(event_id="c", title="定例",
-                                              start=datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc))])
+    d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t", items=many_to)
     blocks = render_slack_blocks(d, interactive=True)
     assert len(blocks) <= 49
-    assert any("あなた宛" in str(b) for b in blocks)           # To は必ず出る（予算先取り）
-    assert any("表示省略" in str(b) for b in blocks)            # 溢れは省略表記
-    assert not any("今日の予定" in str(b) for b in blocks)      # カレンダーは予算切れで degrade
+    assert any("今日やること" in str(b) for b in blocks)   # To見出しは残る
+    assert any("省略" in str(b) for b in blocks)          # Top5超は省略表記

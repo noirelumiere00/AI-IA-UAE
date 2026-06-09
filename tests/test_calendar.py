@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from aiia.auth.token_store import OAuthToken
-from aiia.delivery.slack import _calendar_lines, render_slack_blocks
+from aiia.delivery.slack import _calendar_full_lines, _next_event_str, render_slack_blocks
 from aiia.mcp.workspace_calendar import parse_event, today_bounds
 from aiia.schemas import CalendarEvent, Digest
 
@@ -67,28 +67,34 @@ def _digest(events: list[CalendarEvent], *, failed: bool = False, gen=None) -> D
                   user_id="t", calendar_events=events, calendar_failed=failed)
 
 
-def test_calendar_lines_failed_vs_empty_distinct() -> None:
-    assert "取得できませんでした" in "\n".join(_calendar_lines(_digest([], failed=True)))
-    assert "なし" in "\n".join(_calendar_lines(_digest([])))
+def test_calendar_full_lines_failed_vs_empty_distinct() -> None:
+    assert "取得できませんでした" in "\n".join(_calendar_full_lines(_digest([], failed=True)))
+    assert "なし" in "\n".join(_calendar_full_lines(_digest([])))
 
 
-def test_calendar_lines_next_highlight_allday_needsaction() -> None:
+def test_next_event_str_highlight() -> None:
     d = _digest([
-        CalendarEvent(event_id="a", title="終日休暇", all_day=True,
-                      start=datetime(2026, 6, 9, tzinfo=JST)),
-        CalendarEvent(event_id="b", title="商談", response_status="needsAction",
+        CalendarEvent(event_id="a", title="終日休暇", all_day=True, start=datetime(2026, 6, 9, tzinfo=JST)),
+        CalendarEvent(event_id="b", title="商談",
                       start=datetime(2026, 6, 9, 10, 0, tzinfo=JST), end=datetime(2026, 6, 9, 11, 0, tzinfo=JST)),
     ])
-    txt = "\n".join(_calendar_lines(d))
-    assert "⏭ 次は 10:00 商談（あと2時間" in txt  # 次の予定ハイライト
-    assert "🗓 終日: 終日休暇" in txt
-    assert "❓未応答" in txt
+    assert "⏭ 次 10:00 商談（あと2時間" in (_next_event_str(d) or "")  # サマリ用1行
 
 
-def test_calendar_lines_folds_over_max() -> None:
+def test_calendar_full_lines_allday_and_needsaction() -> None:
+    d = _digest([
+        CalendarEvent(event_id="a", title="終日休暇", all_day=True, start=datetime(2026, 6, 9, tzinfo=JST)),
+        CalendarEvent(event_id="b", title="商談", response_status="needsAction",
+                      start=datetime(2026, 6, 9, 10, 0, tzinfo=JST)),
+    ])
+    txt = "\n".join(_calendar_full_lines(d))
+    assert "🗓 終日: 終日休暇" in txt and "❓" in txt
+
+
+def test_calendar_full_lines_folds_over_max() -> None:
     evs = [CalendarEvent(event_id=str(i), title=f"会議{i}",
                          start=datetime(2026, 6, 9, 9 + i, 0, tzinfo=JST)) for i in range(8)]
-    txt = "\n".join(_calendar_lines(_digest(evs)))
+    txt = "\n".join(_calendar_full_lines(_digest(evs)))
     assert "ほか3件" in txt  # 8件 → 5件表示 + ほか3件
 
 
