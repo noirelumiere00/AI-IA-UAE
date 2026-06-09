@@ -22,6 +22,19 @@ AiLa の朝メールダイジェストが「**何を出し/何を畳み/どう�
   - **👥 CC（情報共有・参考）** … 非アクションの `cc` のみ
 - ラベル `AIIA/<cat>` は**個別表示分のみ** Gmail に付与（一般メールには付けない＝Gmailもクリーン）
 - **Recall 優先**（見落とし ＜ 出し過ぎ）。迷ったら出す。
+- **表示順（Block Kit ≤49・予算先取り）**：ヘッダ＋意思決定サマリ → 🔔リマインド → 📥To → 📅今日の予定 → 👥CC → 📭一般(件数) → フッタ。**溢れはカレンダー/CC側から件数化に degrade**（最重要のリマインド/Toを潰さない）。
+
+## 3.5 カレンダー（今日の予定・読み取り専用）
+- 本人 `primary` を `events.list(今日JST境界・singleEvents・orderBy=startTime)`。書込(insert/delete/update)は**toolsetに出さない**＝コード規律で読み取り専用。
+- 表示：**⏭次の予定ハイライト**＋**終日別出し**／`declined`除外・`needsAction`は「❓未応答」／**≥6件は「次＋直近+ほかN件」に件数fold**（常に1ブロック）。**0件＝「予定なし」と取得失敗を区別**（連携切れを暇と誤認させない）。
+- 件名 privacy：`show_titles=false` で「HH:MM 予定あり（件名非表示）」。`redact()` は秘密(鍵/カード)用で機微語は消えない旨を誤認しない。
+
+## 3.6 返信リマインド（重要×未返信×N営業日）
+- **未返信判定（誤検知最小化）** = 最新メッセージが ①`SENT`ラベル無し（本人未送信＝From文字列に非依存）②`Auto-Submitted`無し（OOO除外）③`List-Id`/`Precedence:bulk`/`noreply`無し（メルマガ除外）。
+- **母集団** = 重要cat × `recipient_kind==to` × `is_actionable`（Cc/FYIは催促しない）。
+- **しきい値（営業日）** = CLIENT_URGENT/PRESS=**1**、CLIENT_NORMAL/FINANCE=**3**（土日除外）。
+- **追跡** = 朝バッチで `reminder_store`(DynamoDB・PK=email,SK=thread) に記録、毎朝 `get_thread` で**再取得**して判定（日次ウィンドウ非依存）。**返信済み(SENT)/スヌーズ3回/14営業日 で自動解除**（永久催促禁止）。
+- **UX** = 最上段「🔔未返信」＋要約＋[✏️対応する/✅対応済み/⏰後で/🔕通知しない]。解除は**論理削除＋↩取り消す**（誤解除復活）。`dry_run` は状態を変えない。
 
 ## 4. 下書き Draft
 - `draft_categories = [CLIENT_URGENT, PRESS_MEDIA]` かつ既存下書き無のみ
