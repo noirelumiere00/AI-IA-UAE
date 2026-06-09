@@ -47,10 +47,28 @@ class AnthropicLLM:
             from anthropic import AnthropicBedrock  # 遅延 import（未導入でも本番以外は動く）
 
             self._client = AnthropicBedrock(aws_region=self._region)
+        self._cost_usd = 0.0  # 当インスタンスの累積コスト（予算ガード用）
+
+    # モデル種別→(入力,出力) USD/1Mトークン
+    _PRICE = {"haiku": (1.0, 5.0), "sonnet": (3.0, 15.0), "opus": (5.0, 25.0)}
+
+    @property
+    def cost_usd(self) -> float:
+        return self._cost_usd
+
+    def _accumulate_cost(self, model: str, usage: Any) -> None:
+        if usage is None:
+            return
+        in_tok = float(getattr(usage, "input_tokens", 0) or 0)
+        out_tok = float(getattr(usage, "output_tokens", 0) or 0)
+        rate = next((r for key, r in self._PRICE.items() if key in model), (3.0, 15.0))
+        self._cost_usd += (in_tok * rate[0] + out_tok * rate[1]) / 1_000_000
 
     def _create(self, **kwargs: Any) -> Any:
-        """messages.create を Bedrock throttle 用の指数バックオフで包む。"""
-        return call_with_retry(lambda: self._client.messages.create(**kwargs))
+        """messages.create を Bedrock throttle 用の指数バックオフで包み、usage からコスト集計。"""
+        msg = call_with_retry(lambda: self._client.messages.create(**kwargs))
+        self._accumulate_cost(str(kwargs.get("model", "")), getattr(msg, "usage", None))
+        return msg
 
     def summarize_text(self, system: str, user: str, *, max_tokens: int = 512) -> str:
         """汎用テキスト要約（StyleProfile 抽出用・haiku）。tool_use なし・素テキスト。"""

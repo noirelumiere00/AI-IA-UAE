@@ -48,6 +48,8 @@ class PipelineDeps:
     # M3: 文体プロファイル(本人)・関連Slack文脈(スレッド毎)。未指定なら従来どおり素のdraft。
     style_provider: Optional[Callable[[UserConfig], Optional[str]]] = None
     grounding_provider: Optional[Callable[[EmailThread], Optional[str]]] = None
+    # M1 hardening: per-user/日 のコスト上限（LLMが cost_usd を持つ場合に超過で draft をスキップ）。
+    max_budget_usd: Optional[float] = None
 
 
 def _fetch_threads(deps: PipelineDeps) -> list[EmailThread]:
@@ -129,7 +131,13 @@ def run(deps: PipelineDeps) -> AgentResult:
             # 下書き（対象カテゴリ＆既存下書き無のみ）。プレビューは常に作り、Gmail保存は非dry_run時のみ。
             draft: Optional[DraftReply] = None
             draft_id: Optional[str] = None
-            if cls.category.value in draft_cats and not thread.has_existing_draft:
+            over_budget = (
+                deps.max_budget_usd is not None
+                and getattr(deps.llm, "cost_usd", 0.0) >= deps.max_budget_usd
+            )
+            if over_budget and cls.category.value in draft_cats and audit:
+                audit.record("draft_skipped_budget", thread_id=thread.thread_id)
+            if cls.category.value in draft_cats and not thread.has_existing_draft and not over_budget:
                 style = deps.style_provider(deps.user) if deps.style_provider else None
                 slack_ctx = deps.grounding_provider(thread) if deps.grounding_provider else None
                 d = deps.llm.draft(thread, summary, deps.user, style=style, slack_context=slack_ctx)
