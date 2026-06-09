@@ -4,8 +4,10 @@
 #   ./scripts/aila.sh migrate [--dry-run]   # TeamAgent RDS→DynamoDB トークン移行
 #   ./scripts/aila.sh batch                 # 連携済み全員の朝ダイジェスト→Slack DM配信
 #   ./scripts/aila.sh serve                 # 対話常駐（編集/削除/送信2段確認）Socket Mode
+#   ./scripts/aila.sh connect-web           # OAuthコールバック受け(localhost:8788)
 #   ./scripts/aila.sh connect-link <email...>  # 管理者用 連携リンク生成
-#   ./scripts/aila.sh check                 # 必須 env が埋まっているか（FILL_ME 残りを警告）
+#   ./scripts/aila.sh set-slack <xoxb> <xapp>  # Slackトークン設定(形式検査)
+#   ./scripts/aila.sh check                 # env が埋まっているか(形式検査)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f .env.aila ] && set -a && . ./.env.aila && set +a
@@ -59,7 +61,13 @@ store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUT
   connect-link)
     $PY -m aiia.scripts.make_connect_links "$@"
     ;;
+  connect-web)  # OAuthコールバック受け（localhost:8788）。/connect や connect-link のリンク先
+    $PY -c "import os,uvicorn;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
+from aiia.connect_web.app import create_app;\
+store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID']));\
+uvicorn.run(create_app(redirect_uri=os.environ['OAUTH_REDIRECT_URI'], store=store), host='127.0.0.1', port=8788)"
+    ;;
   *)
-    sed -n '2,9p' "$0"
+    sed -n '2,10p' "$0"
     ;;
 esac
