@@ -124,6 +124,16 @@ class AnthropicLLM:
             tool=tool,
         )
         data["thread_id"] = thread.thread_id  # LLM の値で上書き（正しい thread_id を強制）
+        # action_item が1個でも不正(例: deadlineに source_quote 無し)だと要約全体が落ちるので、
+        # 個別検証して不正なものだけ捨てる（extract と同じ堅牢化・要約本体は活かす）。
+        raw_items = data.pop("action_items", None) or []
+        valid: list[dict] = []
+        for it in raw_items:
+            try:
+                valid.append(ActionItem.model_validate(it).model_dump())
+            except ValidationError:
+                continue
+        data["action_items"] = valid
         return ThreadSummary.model_validate(data)
 
     def extract(self, thread: EmailThread) -> list[ActionItem]:

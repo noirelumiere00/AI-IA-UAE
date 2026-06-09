@@ -36,6 +36,17 @@ def test_real_internal_mail_stays_internal() -> None:
     assert cls.category == Category.INTERNAL
 
 
+def test_internal_mail_with_press_words_is_not_press() -> None:
+    # 社内連絡/業務日報が「記者/メディア」語で PRESS 誤検知しない（社外のみPRESS）
+    th = _thread(sender="a-moriya@vectorinc.co.jp", domain="vectorinc.co.jp",
+                 subject="【18Fスタジオ】記者発表会のため通り抜けご遠慮", body="終日使用します")
+    assert classify_from_hints(heuristic_signals(th, _user())).category == Category.INTERNAL
+    # 社外の取材依頼は PRESS のまま
+    ext = _thread(sender="reporter@press.example", domain="press.example",
+                  subject="取材のご依頼", body="インタビューさせてください")
+    assert classify_from_hints(heuristic_signals(ext, _user())).category == Category.PRESS_MEDIA
+
+
 # ── is_actionable ───────────────────────────────────────────────────────────
 def test_actionable_true_on_request() -> None:
     th = _thread(sender="a@vectorinc.co.jp", domain="vectorinc.co.jp", subject="ご相談",

@@ -157,8 +157,9 @@ def classify_from_hints(hints: Hints) -> ClassificationResult:
         if hints.has_urgent_kw:
             return res(Category.CLIENT_URGENT, 0.92, "VIP＋緊急語")
         return res(Category.CLIENT_NORMAL, 0.8, "VIP（非緊急）")
-    if hints.is_press:
-        return res(Category.PRESS_MEDIA, 0.85, "媒体/取材")
+    # PRESS は社外のみ（社内連絡や業務日報が「記者/メディア」語で誤検知するのを防ぐ）
+    if hints.is_press and not hints.is_internal:
+        return res(Category.PRESS_MEDIA, 0.85, "媒体/取材（社外）")
     if hints.is_client:
         if hints.has_urgent_kw:
             return res(Category.CLIENT_URGENT, 0.85, "クライアント＋緊急語")

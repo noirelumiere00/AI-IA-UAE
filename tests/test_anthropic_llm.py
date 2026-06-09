@@ -94,6 +94,21 @@ def test_summarize_overwrites_thread_id() -> None:
     assert s.thread_id == "t1"  # LLM の "WRONG" を実 thread_id で上書き
 
 
+def test_summarize_drops_invalid_action_item_not_whole_summary() -> None:
+    # deadlineに source_quote 無しの不正itemが混ざっても、要約全体は落とさず不正itemだけ捨てる
+    fb = FakeBedrock(tool_inputs={"emit_summary": {
+        "thread_id": "x", "one_liner": "重要な要約", "tone": "neutral",
+        "action_items": [
+            {"text": "締切6/9", "kind": "deadline", "source_quote": ""},               # 不正→棄却
+            {"text": "返信する", "kind": "action", "source_quote": "ご返信ください"},      # 有効
+        ],
+    }})
+    s = AnthropicLLM(_platform(), client=fb).summarize(_thread())
+    assert s.one_liner == "重要な要約"        # 要約本体は生きている（スレッド失敗にならない）
+    assert len(s.action_items) == 1          # 不正itemだけ捨てた
+    assert s.action_items[0].kind == "action"
+
+
 def test_extract_drops_fabricated_deadline() -> None:
     fb = FakeBedrock(tool_inputs={"emit_actions": {"items": [
         {"text": "締切", "source_quote": "", "kind": "deadline"},      # 原文引用なし→棄却
