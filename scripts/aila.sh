@@ -31,6 +31,15 @@ case "$cmd" in
     chk SLACK_APP_TOKEN "${SLACK_APP_TOKEN:-}" '^xapp-[A-Za-z0-9-]+$'
     [ "$miss" = 0 ] && echo "✅ env OK（形式も検査済）" || { echo "⚠ 未設定/形式不正あり（.env.aila を編集）"; exit 1; }
     ;;
+  set-slack)  # ./scripts/aila.sh set-slack <xoxb-...> <xapp-...>  ※引数で渡す＝ペースト安全
+    bot="${1:-}"; app="${2:-}"
+    [[ "$bot" =~ ^xoxb-[A-Za-z0-9-]+$ ]] || { echo "✗ 第1引数が xoxb- 形式でない（本物のBot Tokenを渡す）"; exit 1; }
+    [[ "$app" =~ ^xapp-[A-Za-z0-9-]+$ ]] || { echo "✗ 第2引数が xapp- 形式でない（本物のApp Tokenを渡す）"; exit 1; }
+    sed -i '' "s|^export SLACK_BOT_TOKEN=.*|export SLACK_BOT_TOKEN=$bot|" .env.aila
+    sed -i '' "s|^export SLACK_APP_TOKEN=.*|export SLACK_APP_TOKEN=$app|" .env.aila
+    echo "✅ Slackトークンを .env.aila に設定（形式検査OK）"
+    exec "$0" check
+    ;;
   smoke)
     $PY -c "import os;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
 print('連携済み:', DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID'])).list_emails())"
