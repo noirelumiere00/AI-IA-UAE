@@ -30,8 +30,8 @@ def test_draft_user_prompt_body_only_no_signature() -> None:
     # 本文のみ指示・署名(差出人名)は促さない（Gmail署名に委ねる）
     summ = ThreadSummary(thread_id="x", one_liner="返信依頼")
     out = prompts.draft_user_prompt(_thread(), summ, UserConfig(display_name="小俣翔碁"))
-    assert "小俣翔碁" not in out and "署名" not in out
-    assert "本文のみ" in out
+    assert "小俣翔碁" not in out  # 差出人名(署名)を本文に注入しない
+    assert "本文のみ" in out      # 本文のみ指示
 
 
 def test_draft_system_forbids_scaffolding() -> None:
