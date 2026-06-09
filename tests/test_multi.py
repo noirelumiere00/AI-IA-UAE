@@ -22,7 +22,7 @@ class FakeSlackWC:
     def conversations_open(self, *, users: str) -> dict:
         return {"ok": True, "channel": {"id": "D_" + users}}
 
-    def chat_postMessage(self, *, channel: str, blocks: list, text: str) -> dict:
+    def chat_postMessage(self, *, channel: str, blocks: list, text: str, **kw: object) -> dict:
         self.sent.append(channel)
         return {"ok": True}
 

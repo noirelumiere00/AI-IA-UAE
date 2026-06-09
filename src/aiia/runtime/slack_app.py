@@ -192,45 +192,69 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
         draft_id = json.loads(view["private_metadata"])["draft_id"]
         uid = body["user"]["id"]
         msg = await _run(lambda: handle_send_submit(deps, slack_user_id=uid, draft_id=draft_id))
-        await client.chat_postMessage(channel=uid, text=msg)
+        await client.chat_postMessage(channel=uid, text=msg, unfurl_links=False, unfurl_media=False)
 
     # ── 返信リマインド ──────────────────────────────────────────────────────
+    _RX = {"dismiss": "white_check_mark", "snooze": "alarm_clock", "mute": "no_bell"}
+
+    async def _react(client: Any, ch: str, ts: Optional[str], name: str, *, add: bool = True) -> None:
+        """親メッセージに✅等のスタンプ（最終アクションの可視化）。reactions:write未付与でも本処理は止めない。"""
+        if not ts:
+            return
+        try:
+            if add:
+                await client.reactions_add(channel=ch, timestamp=ts, name=name)
+            else:
+                await client.reactions_remove(channel=ch, timestamp=ts, name=name)
+        except Exception:  # noqa: BLE001
+            pass
+
     @app.action(ACTION_REMIND_REPLY)
     async def on_remind_reply(ack: Any, body: Any, client: Any) -> None:
-        await ack()  # 元のサマリーは消さず、スレッドに下書きを展開（編集/送信2段つき）
+        await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         ch = body["channel"]["id"]
         ts = body["message"].get("ts")
+        # ① 即座にプレースホルダ（@mention＋reply_broadcastで本体DMにも表示＝自動で気づける）
+        ph = await client.chat_postMessage(
+            channel=ch, thread_ts=ts, reply_broadcast=True,
+            text=f"<@{uid}> ✏️ 返信下書きを作成しています…", unfurl_links=False, unfurl_media=False)
+        ph_ts = ph.get("ts")
+        # ② LLMで下書き生成 → プレースホルダを chat_update で差し替え（体感ラグ解消）
         info = await _run(lambda: handle_remind_reply(deps, slack_user_id=uid, thread_id=tid))
         if info.get("draft_id"):
             preview = (f"✏️ *返信下書きを作成しました*（Gmailの下書きにも保存済）\n"
                        f"宛先: {info.get('to', '')}\n件名: {info.get('subject', '')}\n\n{info.get('body', '')}")
-            blocks = [_section(preview), _item_actions(info["draft_id"])]
-            await client.chat_postMessage(channel=ch, thread_ts=ts, text="返信下書きを作成しました", blocks=blocks)
+            await client.chat_update(channel=ch, ts=ph_ts, text="返信下書きを作成しました",
+                                     blocks=[_section(preview), _item_actions(info["draft_id"])])
         else:
-            await client.chat_postMessage(channel=ch, thread_ts=ts,
-                text=f"Gmailで返信してください: {info.get('gmail_link', '')}")
+            await client.chat_update(channel=ch, ts=ph_ts,
+                                     text=f"Gmailで返信してください: {info.get('gmail_link', '')}")
 
-    # 押下フィードバックは**可視のスレッド返信**で統一（DMでは ephemeral が表示されないため）。
-    async def _remind_ack(body: Any, client: Any, msg: str, *, undo_tid: Optional[str] = None) -> None:
-        ch = body["channel"]["id"]
+    # 押下フィードバック＝可視のスレッド返信（@mention付き）。戻り値tsにスタンプを付ける。
+    async def _remind_ack(body: Any, client: Any, msg: str, *, undo_tid: Optional[str] = None) -> Optional[str]:
+        ch, uid = body["channel"]["id"], body["user"]["id"]
         ts = body["message"].get("ts")
         blocks = _undo_blocks(undo_tid, msg) if undo_tid else None
-        await client.chat_postMessage(channel=ch, thread_ts=ts, text=msg, blocks=blocks)
+        resp = await client.chat_postMessage(channel=ch, thread_ts=ts, text=f"<@{uid}> {msg}",
+                                             blocks=blocks, unfurl_links=False, unfurl_media=False)
+        return resp.get("ts")
 
     @app.action(ACTION_REMIND_SNOOZE)
     async def on_remind_snooze(ack: Any, body: Any, client: Any) -> None:
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_snooze(deps, slack_user_id=uid, thread_id=tid))
-        await _remind_ack(body, client, msg)
+        conf_ts = await _remind_ack(body, client, msg)
+        await _react(client, body["channel"]["id"], conf_ts, _RX["snooze"])
 
     @app.action(ACTION_REMIND_DISMISS)
     async def on_remind_dismiss(ack: Any, body: Any, client: Any) -> None:
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_dismiss(deps, slack_user_id=uid, thread_id=tid))
-        await _remind_ack(body, client, msg, undo_tid=tid)
+        conf_ts = await _remind_ack(body, client, msg, undo_tid=tid)
+        await _react(client, body["channel"]["id"], conf_ts, _RX["dismiss"])  # ✅ 緑チェック
 
     @app.action(ACTION_REMIND_MUTE)
     async def on_remind_mute(ack: Any, body: Any, client: Any) -> None:
@@ -238,13 +262,17 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
         tid = body["actions"][0]["selected_option"]["value"]
         uid = body["user"]["id"]
         msg = await _run(lambda: handle_remind_mute(deps, slack_user_id=uid, thread_id=tid))
-        await _remind_ack(body, client, msg, undo_tid=tid)
+        conf_ts = await _remind_ack(body, client, msg, undo_tid=tid)
+        await _react(client, body["channel"]["id"], conf_ts, _RX["mute"])
 
     @app.action(ACTION_REMIND_UNDO)
     async def on_remind_undo(ack: Any, body: Any, client: Any) -> None:
-        await ack()
+        await ack()  # 元の確認メッセージ（このundoボタンが居るメッセージ）から✅等を外す
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_undo(deps, slack_user_id=uid, thread_id=tid))
+        ch, conf_ts = body["channel"]["id"], body["message"].get("ts")
+        for nm in _RX.values():
+            await _react(client, ch, conf_ts, nm, add=False)
         await _remind_ack(body, client, msg)
 
     return app

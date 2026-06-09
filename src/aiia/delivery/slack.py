@@ -138,8 +138,13 @@ def _calendar_full_lines(d: Digest) -> list[str]:
     allday = [e for e in evs if e.all_day]
     out = [f"📅 *今日の予定*（{len(evs)}件）"]
     for e in timed[:_CAL_LIST_MAX]:
+        extra = ""
+        if e.location:
+            extra += f" 📍{e.location}"
+        if e.conference_url:
+            extra += f" <{e.conference_url}|🔗参加>"
         mark = " ❓未応答" if e.response_status == "needsAction" else ""
-        out.append(f"`{_fmt_t(e.start)}`　{_ev_title(e)}{mark}")  # 時刻(左・等幅)＋全角space＋予定(右)
+        out.append(f"`{_fmt_t(e.start)}`　{_ev_title(e)}{extra}{mark}")  # 時刻左＋予定＋会議室/参加URL
     if len(timed) > _CAL_LIST_MAX:
         out.append(f"`     `　ほか{len(timed) - _CAL_LIST_MAX}件")
     if allday:

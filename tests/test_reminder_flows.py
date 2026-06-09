@@ -198,3 +198,12 @@ def test_expired_after_14_business_days_in_compute() -> None:
 
     views = reminder.compute_reminders(rstore, _G(), EMAIL, [], {}, _now(), write=True)
     assert views == [] and rstore.get(EMAIL, TID).status == "dismissed"  # 14営業日超で自動解除
+
+
+def test_reply_records_draft_and_dismiss_cleans_orphan() -> None:
+    # 対応する→下書きIDが記録、対応済み→編集だけの孤児下書きを片付ける
+    deps, rstore, svc = _deps()
+    handle_remind_reply(deps, slack_user_id=UID, thread_id=TID)
+    assert rstore.get(EMAIL, TID).reply_draft_id == "d_t1"        # 記録
+    handle_remind_dismiss(deps, slack_user_id=UID, thread_id=TID)
+    assert ("delete", "d_t1") in svc.calls                        # 孤児を削除

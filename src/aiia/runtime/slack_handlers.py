@@ -84,7 +84,16 @@ def _remind_email(deps: HandlerDeps, slack_user_id: str) -> str:
 
 def handle_remind_dismiss(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
     email = _remind_email(deps, slack_user_id)
+    rec = deps.reminder_store.get(email, thread_id)
     _reminder.dismiss(deps.reminder_store, email, thread_id, datetime.now(timezone.utc))
+    # 編集だけして送信/削除しなかった孤児下書きを片付ける（最終アクション=対応済みを実体に反映）
+    if rec is not None and getattr(rec, "reply_draft_id", None):
+        try:
+            token = deps.store.get(email)
+            if token:
+                deps.sender_factory(token).delete_draft(rec.reply_draft_id)
+        except Exception:  # noqa: BLE001 — 下書き削除失敗で解除は止めない
+            pass
     if deps.audit:
         deps.audit.record("remind_dismissed", thread_id=thread_id)
     return "✅ 対応済みにしました（誤りなら↩取り消すで戻せます）。"
@@ -116,6 +125,11 @@ def handle_remind_reply(deps: HandlerDeps, *, slack_user_id: str, thread_id: str
     if deps.reply_draft_factory is None:
         return {"draft_id": "", "gmail_link": link, "body": "", "subject": "", "to": ""}
     info = deps.reply_draft_factory(email, thread_id)
+    # 作成した下書きIDをリマインドに記録（対応済み時に孤児を片付けられるように）
+    rec = deps.reminder_store.get(email, thread_id) if deps.reminder_store else None
+    if rec is not None and info.get("draft_id"):
+        rec.reply_draft_id = info["draft_id"]
+        deps.reminder_store.upsert(rec)
     if deps.audit:
         deps.audit.record("remind_reply_drafted", thread_id=thread_id, draft_id=info.get("draft_id", ""))
     return {**info, "gmail_link": link}

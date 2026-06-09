@@ -76,11 +76,16 @@ def _fetch_today_events(deps: PipelineDeps) -> tuple[list[CalendarEvent], bool]:
         events = list(cal.list_today_events())
     except Exception:  # noqa: BLE001 — カレンダー失敗でメール本処理は止めない
         return [], True
-    # 件名privacy：show_titles=False は件名を伏せる。redact は秘密(鍵/カード)を消す保険(機微語は別途toggleで)。
+    # 件名privacy：show_titles=False は件名/会議室/説明を伏せる。redactは秘密(鍵/カード)を消す保険。
     if not cal_cfg.show_titles:
-        events = [e.model_copy(update={"title": ""}) for e in events]
+        events = [e.model_copy(update={"title": "", "location": None, "description": None})
+                  for e in events]
     else:
-        events = [e.model_copy(update={"title": redact(e.title)}) for e in events]
+        events = [e.model_copy(update={
+            "title": redact(e.title),
+            "location": redact(e.location) if e.location else None,
+            "description": redact(e.description) if e.description else None,
+        }) for e in events]
     return events, False
 
 

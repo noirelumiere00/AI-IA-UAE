@@ -6,6 +6,7 @@ googleapiclient は遅延 import（未導入でも他テストは動く）。
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -13,6 +14,18 @@ from aiia.auth.token_store import OAuthToken
 from aiia.schemas import CalendarEvent
 
 JST = timezone(timedelta(hours=9))
+_URL_RE = re.compile(r"https?://[^\s<>\"]+")
+
+
+def _conference_url(ev: dict) -> Optional[str]:
+    """会議URL: hangoutLink → conferenceData.entryPoints → description内URL の順。"""
+    if ev.get("hangoutLink"):
+        return str(ev["hangoutLink"])
+    for ep in (ev.get("conferenceData", {}) or {}).get("entryPoints", []) or []:
+        if ep.get("uri"):
+            return str(ep["uri"])
+    m = _URL_RE.search(ev.get("description", "") or "")
+    return m.group(0) if m else None
 
 
 def _parse_dt(d: dict) -> Optional[datetime]:
@@ -42,6 +55,9 @@ def parse_event(ev: dict) -> CalendarEvent:
         end=_parse_dt(ev.get("end", {}) or {}),
         all_day="date" in start,
         response_status=_self_response(ev),
+        conference_url=_conference_url(ev),
+        location=(ev.get("location") or "").strip() or None,
+        description=(ev.get("description") or "").strip() or None,
     )
 
 

@@ -156,6 +156,9 @@ class CalendarEvent(BaseModel):
     all_day: bool = False
     # accepted / tentative / needsAction / declined（declined は表示前に除外）
     response_status: str = "accepted"
+    conference_url: Optional[str] = None  # Meet/Zoom 等の参加URL
+    location: Optional[str] = None         # 会議室/場所
+    description: Optional[str] = None       # 説明（redaction対象・URL/会議室がここに入ることも）
 
 
 class ReminderView(BaseModel):

@@ -99,3 +99,25 @@ def test_calendar_section_present_in_blocks_within_limit() -> None:
     blocks = render_slack_blocks(d)
     assert len(blocks) <= 49
     assert any("今日の予定" in str(b) for b in blocks)
+
+
+def test_parse_event_conference_url_priority_and_location() -> None:
+    # hangoutLink 優先
+    e = parse_event({"id": "1", "summary": "MTG", "start": {"dateTime": "2026-06-09T14:00:00+09:00"},
+                     "hangoutLink": "https://meet.google.com/abc-defg-hij", "location": "会議室E"})
+    assert e.conference_url == "https://meet.google.com/abc-defg-hij" and e.location == "会議室E"
+    # hangoutLink無→conferenceData
+    e2 = parse_event({"id": "2", "summary": "Zoom", "start": {"dateTime": "2026-06-09T15:00:00+09:00"},
+                      "conferenceData": {"entryPoints": [{"uri": "https://zoom.us/j/xyz"}]}})
+    assert e2.conference_url == "https://zoom.us/j/xyz"
+    # 両方無→description内URL
+    e3 = parse_event({"id": "3", "summary": "定例", "start": {"dateTime": "2026-06-09T16:00:00+09:00"},
+                      "description": "詳細は https://meet.google.com/desc-url まで"})
+    assert "meet.google.com/desc-url" in (e3.conference_url or "")
+
+
+def test_calendar_full_lines_shows_room_and_join() -> None:
+    d = _digest([CalendarEvent(event_id="a", title="商談", start=datetime(2026, 6, 9, 14, 0, tzinfo=JST),
+                               conference_url="https://meet.google.com/abc", location="会議室E")])
+    txt = "\n".join(_calendar_full_lines(d))
+    assert "📍会議室E" in txt and "meet.google.com/abc" in txt and "🔗参加" in txt

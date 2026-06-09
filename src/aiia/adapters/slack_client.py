@@ -68,5 +68,8 @@ class SlackDelivery:
         channel = self.open_dm(uid)
         if not channel:
             return False
-        resp = self._wc().chat_postMessage(channel=channel, blocks=blocks, text=text)
+        resp = self._wc().chat_postMessage(
+            channel=channel, blocks=blocks, text=text,
+            unfurl_links=False, unfurl_media=False,  # GmailリンクのプレビューカードをOFF
+        )
         return bool(resp.get("ok"))

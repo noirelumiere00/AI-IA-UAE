@@ -20,6 +20,7 @@ class ReminderRecord:
     snooze_until: Optional[datetime] = None
     snooze_count: int = 0
     status: str = "active"  # active | dismissed | muted | expired
+    reply_draft_id: Optional[str] = None  # 「対応する」で作った下書きID（対応済み時に孤児を片付ける）
 
 
 class ReminderStore(Protocol):
@@ -80,6 +81,8 @@ class DynamoDbReminderStore:
             item["last_action_at"] = {"S": r.last_action_at.isoformat()}
         if r.snooze_until:
             item["snooze_until"] = {"S": r.snooze_until.isoformat()}
+        if r.reply_draft_id:
+            item["reply_draft_id"] = {"S": r.reply_draft_id}
         return item
 
     def _from_item(self, it: dict) -> ReminderRecord:
@@ -92,6 +95,7 @@ class DynamoDbReminderStore:
             snooze_until=_dt(it.get("snooze_until", {}).get("S")),
             snooze_count=int(it.get("snooze_count", {}).get("N", "0")),
             status=it.get("status", {}).get("S", "active"),
+            reply_draft_id=it.get("reply_draft_id", {}).get("S"),
         )
 
     def get(self, user_email: str, thread_id: str) -> Optional[ReminderRecord]:
