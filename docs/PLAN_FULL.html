@@ -1402,7 +1402,7 @@ mcp__Slack__slack_send_message_draft(channel_id=&quot;&lt;USER_ID&gt;&quot;, mes
 <ul>
 <li>マルチテナント厳格分離。スケジュールは各TZで分散(07:45–08:15)・セマフォで並列度制御。</li>
 <li>レート/コスト: Gmailは per-user quota。Bedrock TPMは並列度上限で平準化。概算 ~20×$19/月 ≈ <strong>$380/月</strong>・<code>max_budget_usd</code>。</li>
-<li>オンボーディング: 管理者が名簿(Workspaceメール)追加→DWDで即接続→opt-inでSent文体ブートストラップ。Slackユーザー↔メール紐付け。</li>
+<li>オンボーディング: 管理者が名簿(Workspaceメール)追加→<strong>各人がSlackからOAuth同意で接続(DWD不採用・§43.1)</strong>→opt-inでSent文体ブートストラップ。Slackユーザー↔メール紐付け。</li>
 <li>pipelineは <code>UserConfig</code>/StyleProfile/Gmailクライアントを<strong>引数注入</strong>でper-user実行。</li>
 </ul>
 <h2 id="44-agentvseo">44. 拡張Agent（VSEOリサーチ / 資料生成 / 自己改善ループ）</h2>
@@ -1422,12 +1422,12 @@ mcp__Slack__slack_send_message_draft(channel_id=&quot;&lt;USER_ID&gt;&quot;, mes
 <h2 id="46-google-calendar">46. 本日の予定（Google Calendar連携）★追加</h2>
 <ul>
 <li><strong>目的</strong>: 朝ダイジェスト先頭に「📅 本日の予定」を表示し、1日の流れ(会議/空き)を一目で把握。</li>
-<li><strong>認証</strong>: 既存DWDに <code>calendar.readonly</code> スコープを追加(管理者付与のみ・<strong>個別同意不要</strong>)。SAで各人をimpersonateしCalendar API取得。</li>
+<li><strong>認証</strong>【修正: DWD不採用・§43.1へ統一】: §43.1の各人OAuth(3-legged)に <code>calendar.readonly</code> スコープを<strong>本人同意で追加</strong>。SA/impersonateは使わず、本人のaccess_tokenでCalendar API取得。</li>
 <li><strong>取得</strong>: 当日(各人TZ)の予定を取得(開始/終了/件名/場所/会議URL/出席者/終日/ステータス)。</li>
 <li><strong>表示</strong>: 時刻順リスト＋初回/最終/会議数＋背中合わせ(連続)や空き時間を注記。</li>
 <li><strong>メール×予定の相互リンク</strong>: 送信者が当日MTGの出席者なら該当メールに「本日MTGあり」フラグ→優先度補正。</li>
-<li><strong>実装</strong>: <code>mcp/toolset.py</code>に<code>fetch_today_events(user)</code>／<code>WorkspaceCalendarToolset</code>(DWD)＋Fake。<code>schemas.py</code>に<code>CalendarEvent</code>/<code>DaySchedule</code>。<code>digest.py</code>に予定セクション。<code>config</code>でON/OFF・対象カレンダー・勤務時間。</li>
-<li><strong>本セッション</strong>: Calendar MCPは未接続のため検証はFake/サンプルで(本番はCalendar API/DWD)。 セキュリティ: 読取専用・per-user分離・同DWD境界。</li>
+<li><strong>実装</strong>: <code>mcp/toolset.py</code>に<code>fetch_today_events(user)</code>／<code>UserCalendarToolset</code>(per-user OAuth)＋Fake。<code>schemas.py</code>に<code>CalendarEvent</code>/<code>DaySchedule</code>。<code>digest.py</code>に予定セクション。<code>config</code>でON/OFF・対象カレンダー・勤務時間。</li>
+<li><strong>本セッション</strong>: Calendar MCPは未接続のため検証はFake/サンプルで(本番はCalendar API/各人OAuth)。 セキュリティ: 読取専用・per-user分離・OAuth最小スコープ境界。</li>
 </ul>
 <h2 id="47-aws-a">47. AWS構築方針（確定: ユーザー選択「A」）</h2>
 <ul>
@@ -1601,6 +1601,389 @@ class SubAgent(Protocol):
 - リスク回避: S1循環import回避(registry最下層・片方向import)／S3でschema_tool単体検証→S8で一発／S4失敗分離／dry_runは<code>assert_no_send</code>手前で分岐。</p>
 <h2 id="_1">実装の進め方（最終）</h2>
 <p>Phase1の実装順序は §48.6 のとおり。<strong>Figma対象外</strong>、<strong>モデル識別子はコミット/PRに含めない</strong>、すべての送信は常に人間が最終実行(下書きのみ自動)。</p>
+<hr />
+<h2 id="52-aiagent-3teamagent">52. 今後のAIAgent化 全体構成プラン（3周自己改善・TeamAgent参照）★確定</h2>
+<blockquote>
+<p>策定: 2026-06-09 / 手順: Planエージェントの3周自己改善（Round1ドラフト→Round2レッドチーム→Round3確定）＋親オーケストレータのレビュー統合。<br />
+参照: 同社別Dev版 <strong>TeamAgent v3.0</strong>（GitHub・成熟設計／<strong>ドキュメント先行</strong>＝設計は精緻だが実コードは骨格段階）。本節は §0–51 と矛盾しない「拡張地図」。<br />
+★<strong>オーナー確定判断(2026-06-09)</strong>: 法令チェッカー（薬機法/景表法/ステマ）は <strong>Phase3（全社展開）</strong> で導入。それまでは対外成果物の<strong>人手レビュー</strong>で担保（朝メール・提案書とも送信/確定は人間）。</p>
+</blockquote>
+<h3 id="521">52.1 エグゼクティブサマリ（非エンジニア向け）</h3>
+<p>AI-IA-UAEは「朝メール確認サポート」を第1弾に、将来は対話・資料生成・VSEOまで広がるSlackネイティブの営業AI基盤。本プランはTeamAgentの成熟設計を取り込みつつ、我々の絶対ルール（誤送信ゼロ・各人OAuth・全同期・秘密非コミット）を一切崩さない拡張地図を定める。核心は<strong>新しい仕事(=Skill)を増やすときに土台コード(core)を書き直さない</strong>こと。第1弾の朝メールを「Skill #1」と位置づけ、以降は決まった型(インターフェース)に沿ってファイルを足すだけで増やす。TeamAgentの重い仕組み（プラグイン自動発見・3層メモリ・6コネクタ・常時稼働サーバ群）は20人規模に過剰なので「今いる/後でいい」を明確に線引きした。各段階に受入基準を付け、誤送信ゼロ・監査1年・法令準拠（薬機法/景表法/ステマ/APPI）の担保箇所を明記。月額コストは段階加算（最初は実質Bedrock分のみ）。</p>
+<h3 id="522-round-1">52.2 Round 1 設計（要点）</h3>
+<ul>
+<li><strong>(a) 目標アーキテクチャ(5層＋横断ガードレール)</strong>: TeamAgentの4層(User/Frontend/Orchestrator/Data)を採用しつつ既存§5に接続。Phase1は「Orchestrator=直起動関数」「Data=ローカル/Fake」で薄く始め、層境界(Protocol)だけ先に固定。</li>
+<li><strong>(b) Skill/SubAgent Registry(我々版)</strong>: TeamAgent最大の革新を採用するがPhase1は<strong>軽量in-process辞書登録</strong>。<code>entry_points</code>自動発見・semver・依存トポロジカルソートはYAGNIで後回し。既存§48.4の<code>SubAgent</code>/<code>AgentContext</code>を「Skill契約」に昇格。</li>
+<li><strong>(c) 朝メール = Skill #1</strong>: 既存<code>pipeline.run(deps)</code>をそのまま<code>MorningEmailSkill.run(ctx)</code>が内部呼び出し(ラップのみ・pipeline不変)。将来Skill(proposal/VSEO/summary/press_monitor)は<code>skills/&lt;name&gt;/</code>を追加し<code>registry.register()</code>するだけ。core改修ゼロ。§24ロードマップ#1-10がそのままSkillカタログに。</li>
+<li><strong>(d) データ/RAG・Tier・Memory・法令ガードレールのPhase別投入</strong>: RAG/ベクタはモードA(Phase2-3)まで<code>NullRAGClient</code>(§48.3 既存予約)。法令チェッカーはPhase3に<code>safety/legal.py</code>として横断ガードレール位置へ。Tier/Memoryは型予約のみ・Phase1-2は単一Tier=本人分離で代替。</li>
+<li><strong>(e) Phase別ロードマップ</strong>: §51 S0-S10(朝メールP1)→P1.5でSkill Registry薄殻→P2でモードA(OAuth・Agent SDK runtime・asyncループ)→P3で資料生成＋RAG＋法令→P4で20人本番最適化。</li>
+</ul>
+<h3 id="523-round-2">52.3 Round 2 レッドチーム指摘 → 修正</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>指摘</th>
+<th>重大度</th>
+<th>修正</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>Skillを<code>async run</code>にするとPhase1全同期原則(§48.2-1)に違反</td>
+<td>高</td>
+<td><strong>Phase1は同期<code>def run</code>・<code>max_loop=1</code></strong>。async/orchestratorループはモードA着手時のみ初投入(制約4)</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>entry_points/semver/依存トポロジカルソートは20人ツールに過剰(YAGNI違反)。<strong>循環依存閉路検出未実装</strong>(TeamAgent既知④)を再発</td>
+<td>高</td>
+<td>Phase1-2は<strong>in-process辞書のみ</strong>。<code>depends_on</code>を持たせない＝閉路が原理的に発生しない。entry_points化はP4以降に延期</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>3層Memory(thread/project/user)は定時バッチの朝メールに不要</td>
+<td>中</td>
+<td>Phase1-2は<strong>Memory無し</strong>(毎回ステートレス)。<code>user</code>軽量メモリ(StyleProfile §43.2)のみ。project/threadはP3+で判断</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>pgvector+RDS+ECS常時稼働+Lambda×6は20人に重く月¥95-105K。非エンジニア運用不能</td>
+<td>高</td>
+<td><strong>常時稼働サーバを持たない</strong>。Phase1-2はcron+Lambdaのみ。RAGも導入時はS3+小規模ベクタから。ECS+RDS前提は採らない</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>TeamAgent DWD前提を引きずると制約3違反。<strong>§46 CalendarがDWDのまま残存</strong></td>
+<td>致命</td>
+<td>OAuth(3-legged+PKCE)を唯一の認証に固定。§46/§43.3のDWD記述を本改訂でOAuthへ修正済。infra/README §5も要更新</td>
+</tr>
+<tr>
+<td>R6</td>
+<td>法令チェッカーを朝メールPhase1に入れると過剰(社内向け下書き中心)</td>
+<td>中</td>
+<td><strong>Phase3(資料生成/対外Skill投入時)に限定</strong>＝オーナー確定判断と一致。Phase1-2はredaction(PII)+NeverSendGate+人手レビューで担保</td>
+</tr>
+<tr>
+<td>R7</td>
+<td>「引用率≥90%/捏造率0%」KPIを朝メールに一律適用は不自然</td>
+<td>中</td>
+<td>KPIをSkill種別で分離。<strong>RAG/資料生成(P3+)にのみ出典ラベル・捏造0%適用</strong>。既存<code>ActionItem.source_quote</code>必須が先取り思想</td>
+</tr>
+<tr>
+<td>R8</td>
+<td>Tool失敗時graceful degradation未実装(TeamAgent既知②)を再発</td>
+<td>中</td>
+<td>§48.2-7「失敗分離→needs_review降格・全体完走」を<strong>全Skill共通契約</strong>に格上げ。外部API抜きフォールバックをP3受入基準に</td>
+</tr>
+<tr>
+<td>R9</td>
+<td>PII復元(pii_lookup・Tier0復元)の盗み見リスク(TeamAgent既知③)</td>
+<td>中</td>
+<td>我々は<strong>PII復元機能を作らない</strong>(不可逆マスクのみ)＝穴が原理的に不在(意図的に違える点)</td>
+</tr>
+<tr>
+<td>R10</td>
+<td>Skill Registryと既存<code>agents/base.py:SubAgent</code>の二重定義で混乱</td>
+<td>低</td>
+<td>新規乱立せず<strong>既存SubAgentをSkillへ昇格</strong>(後方互換alias)。ファイル増殖回避</td>
+</tr>
+<tr>
+<td>R11</td>
+<td>非エンジニアのオーナーがSkill追加・Phase移行を運用できるか</td>
+<td>高</td>
+<td>各Phaseに「オーナーが見て分かる受入基準」1行。Skill追加を「<code>skills/&lt;name&gt;/</code>＋1行登録」レシピ化。CLAUDE.md学習モード継続</td>
+</tr>
+</tbody>
+</table>
+<h3 id="524-round-3">52.4 Round 3 最終アーキテクチャ</h3>
+<h4 id="5241-mermaid">52.4.1 層構成（Mermaid）</h4>
+<pre><code class="language-mermaid">flowchart TB
+  subgraph CH[&quot;チャネル/トリガ層&quot;]
+    CRON[&quot;EventBridge cron 各人TZ~08:00&quot;]
+    SLASH[&quot;Slack /morning・@メンション(Phase2)&quot;]
+  end
+  subgraph ORCH[&quot;オーケストレーション層&quot;]
+    DIRECT[&quot;direct runtime 同期 (Phase1)&quot;]
+    SDKLOOP[&quot;Agent SDK orchestratorループ async (Phase2 モードA初投入)&quot;]
+    REG[&quot;SkillRegistry (Phase1: in-process辞書 / entry_points後回し)&quot;]
+  end
+  subgraph SKILLS[&quot;Skill層 (core改修なしで追加)&quot;]
+    S1[&quot;#1 morning_email = pipeline.run ラップ (Phase1)&quot;]
+    S2[&quot;#2 chat/RAG応答 (Phase2)&quot;]
+    S3[&quot;#3 proposal/資料生成 (Phase3)&quot;]
+    S4[&quot;#N press_monitor/VSEO/summary (§24)&quot;]
+  end
+  subgraph PROV[&quot;モデルプロバイダ層&quot;]
+    FAC[&quot;factory: Bedrock既定(VPC/IAM) / Heuristicフォールバック&quot;]
+  end
+  subgraph MCP[&quot;MCP統合層 (送信系を型から除外)&quot;]
+    GM[&quot;Gmail 読/ラベル/create_draft&quot;]
+    SL[&quot;Slack send_draft のみ&quot;]
+    CAL[&quot;Calendar readonly (Phase2 §46)&quot;]
+    DR[&quot;Drive readonly/file (Phase3)&quot;]
+  end
+  subgraph DATA[&quot;データ/RAG層 (Phaseで投入)&quot;]
+    NULL[&quot;NullRAGClient (Phase1-2 予約)&quot;]
+    KB[&quot;軽量KB: S3+小規模ベクタ (Phase3)&quot;]
+    PROF[&quot;StyleProfile per-user (Phase2)&quot;]
+  end
+  subgraph AUTH[&quot;認証 (DWD不採用)&quot;]
+    OAUTH[&quot;各人OAuth 3-legged+PKCE / refresh_token DynamoDB+KMS&quot;]
+  end
+  GUARD[&quot;横断ガードレール: NeverSendGate(型+二重) / redaction(PII不可逆) / 法令チェッカー(Phase3) / 監査JSONL 1年 / CI grep(送信系文字列)&quot;]
+
+  CH --&gt; ORCH --&gt; SKILLS
+  REG -.登録/取得.-&gt; SKILLS
+  SKILLS --&gt; PROV
+  SKILLS --&gt; MCP
+  SKILLS --&gt; DATA
+  MCP --&gt; OAUTH
+  GUARD -.横断.- ORCH
+  GUARD -.横断.- SKILLS
+  GUARD -.横断.- MCP
+</code></pre>
+<h4 id="5242-skill-registry">52.4.2 Skill Registry 我々版（型シグネチャ）</h4>
+<pre><code class="language-python"># skills/base.py — 既存 agents/base.py:SubAgent を昇格（後方互換 alias: SubAgent = Skill）
+from typing import Protocol, Optional
+from pydantic import BaseModel
+from aiia.config import UserConfig, PlatformConfig
+from aiia.safety.hitl import NeverSendGate
+
+class SkillSpec(BaseModel):
+    name: str
+    description: str
+    draft_only: bool = True          # CIが grep 検証する誤送信ゼロの宣言マーカー
+    required_tier: int = 3           # Phase3まで予約（実効は単一Tier=本人分離）
+    max_loop: int = 1                # Phase1=1（全同期）。モードAで &gt;1（Bedrock制約内）
+    needs_legal_check: bool = False  # Phase3 法令ガードレール適用フラグ（資料/対外Skill=True）
+
+class AgentContext(BaseModel):       # 既存§48.4を踏襲・Phase別に注入を追加
+    user: UserConfig
+    platform: PlatformConfig
+    audit: object                    # AuditLog（既存 safety/audit.py）
+    gate: NeverSendGate              # 必須注入＝誤送信ゼロを契約レベルで強制
+    kb: Optional[object] = None      # Phase3 RAGClient注入（Phase1-2 = None）
+    style_profile: Optional[object] = None  # Phase2 StyleProfile
+    conversation_id: Optional[str] = None   # Phase2 モードA
+    model_config = {&quot;arbitrary_types_allowed&quot;: True}
+
+class AgentResponse(BaseModel):
+    ok: bool = True
+    needs_review: bool = False       # 失敗分離（§48.2-7）の全Skill共通降格先
+    summary: str = &quot;&quot;
+
+class Skill(Protocol):
+    spec: SkillSpec
+    def run(self, ctx: AgentContext, prompt: Optional[str] = None) -&gt; AgentResponse: ...
+
+class SkillRegistry:                 # Phase1=in-process。depends_onを持たせない＝循環依存が原理的に不可能
+    def __init__(self) -&gt; None: self._skills: dict[str, Skill] = {}
+    def register(self, skill: Skill) -&gt; None: ...   # draft_only=Falseなら登録時に警告
+    def get(self, name: str) -&gt; Skill: ...
+    def list(self) -&gt; list[SkillSpec]: ...
+</code></pre>
+<p>朝メールSkillは既存<code>pipeline.run(deps)</code>を一切変えずラップ:</p>
+<pre><code class="language-python"># skills/morning_email/skill.py
+class MorningEmailSkill:
+    spec = SkillSpec(name=&quot;morning_email&quot;, description=&quot;朝メール定時トリアージ＋下書き&quot;,
+                     draft_only=True, max_loop=1)
+    def run(self, ctx: AgentContext, prompt=None) -&gt; AgentResponse:
+        deps = build_pipeline_deps(ctx)          # 既存 PipelineDeps を組み立て
+        result = run_pipeline_sync(deps)         # 既存 pipeline.run（不変）
+        return AgentResponse(ok=True, needs_review=any(i.needs_review for i in result.digest.items))
+</code></pre>
+<h4 id="5243-phase">52.4.3 Phase別ロードマップ</h4>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>名称</th>
+<th>内容</th>
+<th>新規/改修</th>
+<th>認証</th>
+<th>データ層</th>
+<th>月額目安</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P1</strong></td>
+<td>朝メール緑核</td>
+<td>§51 S0-S10完遂。dry-run副作用ゼロ→Bedrock実推論→harness実データ検証</td>
+<td>§48.3新規／既存不変</td>
+<td>OAuth未要(harness/Fake)</td>
+<td>Fake/local file</td>
+<td>~$19/ユーザー(20人で~$380)</td>
+</tr>
+<tr>
+<td><strong>P1.5</strong></td>
+<td>Skill薄殻</td>
+<td><code>agents/base.py</code>→<code>skills/base.py</code>昇格。SkillRegistry(in-process)。朝メール=Skill #1にラップ。CIにdraft_only grep追加</td>
+<td>core不変・薄いラッパ</td>
+<td>同上</td>
+<td>同上</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>モードA最小＋OAuth</td>
+<td>各人OAuth(§43.1・DynamoDB+KMS)。Agent SDK runtime(<code>runtime/sdk.py</code>)でasyncループ初投入。Slack @メンション対話Skill。StyleProfile(§43.2)。Calendar <code>calendar.readonly</code>(§46)</td>
+<td>runtime/sdk.py・OAuth基盤新規</td>
+<td>OAuth 3-legged+PKCE</td>
+<td>StyleProfile / Null RAG</td>
+<td>+OAuth基盤(Lambda/DynamoDB/KMS)数千円〜</td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>RAG＋資料生成＋法令</td>
+<td>社内KB(Drive readonly/S3+小規模ベクタ)。proposal/資料生成Skill。<strong>法令チェッカー(薬機法/景表法/ステマ)投入=オーナー確定</strong>。RAG回答に出典ラベル必須</td>
+<td>kb/・skills/proposal・safety/legal.py</td>
+<td>OAuth＋<code>drive.readonly</code>/<code>drive.file</code></td>
+<td>軽量KB(pgvector前提せず)</td>
+<td>+ベクタ/レンダラ(必要時のみ)</td>
+</tr>
+<tr>
+<td><strong>P4</strong></td>
+<td>20人運用最適化＋Skill拡充</td>
+<td>§24 #2-10をSkill化。プロンプトキャッシュ・予算ガード・Tier/Memory要否を実データ判断。entry_points化はここで初検討</td>
+<td>skills/追加のみ</td>
+<td>同上</td>
+<td>必要に応じTier/Memory</td>
+<td>スケール時に再評価</td>
+</tr>
+</tbody>
+</table>
+<h4 id="5244-phase">52.4.4 各Phaseの受入基準（オーナーが確認できる形）</h4>
+<ul>
+<li><strong>P1</strong>: <code>--dry-run --profile heuristic</code>がネット無で完走・終了コード0・FakeMCPToolset.callsに送信系/create_draft/labelが出ない。<code>--profile bedrock</code>で実推論成功。harnessで実データ3-5件→ダイジェスト＋下書きを人間確認、送信は全て人手。pytest≥80%/ruff/mypy緑。<strong>誤送信ゼロ=MCPToolset型に送信メソッド無し＋NeverSendGate＋CI grep。監査=AuditLog JSONL(メタデータのみ)。法令=PIIマスク(APPI)。</strong></li>
+<li><strong>P1.5</strong>: SkillRegistryに朝メールが1本登録され<code>registry.get("morning_email").run(ctx)</code>が既存pipelineと同一結果。CIが全Skillの<code>draft_only=True</code>と送信系文字列不在を検証。core(providers/mcp/orchestrator/safety)の差分ゼロ。</li>
+<li><strong>P2</strong>: 各人がSlackからOAuth同意→refresh_tokenがDynamoDB+KMS暗号化保存・ユーザー間分離・本人が連携解除可。<code>gmail.send</code>不要求をスコープ定義で確認。モードA対話が@メンションで応答。<strong>誤送信ゼロ=Agent SDK can_use_tool=NeverSendGateで送信Deny。監査=per-user・1年・改ざん防止(AI事業者GL)。秘密=env/Secrets Managerのみ・非コミット。</strong></li>
+<li><strong>P3</strong>: RAG回答の全主張に出典(社内KB/Drive)ラベル・捏造0%(出典無し主張をブロック)。資料生成出力が薬機法/景表法/ステマ法令チェッカーを通過(違反はブロック＋警告)。外部API失敗時はTool抜きフォールバックで完走。<strong>誤送信ゼロ=対外メール下書きも送信は人手。監査=生成物・確認者・時刻を1年記録。</strong></li>
+<li><strong>P4</strong>: 20人並列が各TZ分散＋Semaphoreでレート内・<code>max_budget_usd</code>上限内。新Skill追加でcore改修ゼロを実証。</li>
+</ul>
+<h3 id="525-teamagentfb">52.5 TeamAgentへの改善FB（根拠付き）</h3>
+<ul>
+<li><strong>Skill循環依存の閉路検出が未実装(既知④)→ そもそも<code>depends_on</code>を持たせない設計を推奨</strong>。16人規模で依存グラフのコスト＞便益。フラット登録なら閉路が原理的に発生しない。</li>
+<li><strong>DWD前提は組織ガバナンス上の単一障害点</strong>。漏洩時の影響が全社に及ぶ。各人OAuth(最小スコープ・本人解除可)が情シス監査に強い。少なくとも<code>gmail.send</code>非要求は採るべき。</li>
+<li><strong>PII復元(pii_lookup・Tier0復元)は「他人PII盗み見」リスク(既知③)を内包</strong>。独立監査が未実施なら復元機能自体を持たない(不可逆マスク)方が安全。</li>
+<li><strong>pgvector+RDS+ECS常時稼働は16人に重い(月¥95-105K)</strong>。documentが1000万超で破綻(既知①)する前から過剰投資。S3+サーバレスベクタ/オンデマンドから始め規模で昇格判断を。</li>
+<li><strong>「引用率≥90%/捏造率0%」KPIをSkill種別で分けるべき</strong>。メールサマリ等に一律の出典ラベルは不自然。RAG/提案生成に限定適用が現実的。</li>
+<li><strong>HTML一次出力→on-demand PDF/PPTXは良い設計だが、Skill数が少ない初期はレンダラ常設せずオンデマンド起動で十分</strong>。</li>
+<li><strong>graceful degradation(既知②)を「設計済」でなく各Skillの受入基準に落とすべき</strong>。契約・テストで担保しないと再発する。</li>
+</ul>
+<h3 id="526-teamagentphase">52.6 TeamAgentから採用する設計（どのPhaseで）</h3>
+<ul>
+<li><strong>Skill Registry / Pluginパターン(最大の革新)</strong> — P1.5でin-process軽量版。entry_points/semverはP4以降に判断。</li>
+<li><strong>OrchestratorループとTool呼出時のGuardrailsゲート(schema検証→法令/権限→実行→監査の4段)</strong> — P2でasync導入時。Bedrock制約内(クライアント側ツール実行)で動く。</li>
+<li><strong>法令チェッカー(薬機法/景表法/ステマ)をガードレールに組込む</strong> — <strong>P3(オーナー確定)</strong>、資料生成/対外コンテンツSkill投入時。</li>
+<li><strong>PIIマスク→Tierタグ→Embeddingの順を守る取り込みパイプ</strong> — P3でRAG導入時に「PIIマスクはEmbedding前」を必須化(既存redaction思想と一致)。</li>
+<li><strong>HTML一次出力→on-demand PDF/PPTX、Drive=single source of truth</strong> — P3資料生成Skill。</li>
+<li><strong>Intent Router(confidence&lt;0.7はephemeralで確認してからheavy Skillへ)</strong> — P2モードA。既存§48.2-2の2段分類(confidence&lt;0.8でLLM確定)と同思想で自然に拡張。</li>
+<li><strong>MailWF(毎朝メールサマリ・read-only・送信なし)</strong> — 既に我々のSkill #1と同一。設計の相互検証として確認済。</li>
+<li><strong>3層Memory・Tier 0-3アクセス制御</strong> — 型予約のみ。実データで必要性が出たP3+で部分採用を判断(全採用はしない)。</li>
+</ul>
+<h3 id="527">52.7 我々が意図的に違える設計と理由</h3>
+<ul>
+<li><strong>誤送信を型レベルで不可能化</strong>(MCPToolset Protocolにsend系メソッドを構造的に含めない)＋NeverSendGate二重＋CI grep。TeamAgentは実行時ブロック方式。我々は「呼ぶコードが書けない」構造を加える＝より強い恒久保証(制約1・2)。</li>
+<li><strong>DWD不採用・各人OAuth(3-legged+PKCE)</strong>。情シス指示＋組織ガバナンス(制約3)。<code>gmail.send</code>スコープ非要求。</li>
+<li><strong>Phase1は全同期・YAGNI</strong>。runtime/store層を作らず、async/orchestratorループはモードA着手時に初投入(制約4)。</li>
+<li><strong>常時稼働サーバ(ECS)・RDS+pgvectorを初期に持たない</strong>。cron+Lambda中心。RAGも軽量から昇格。20人に¥95-105K/月は過剰。</li>
+<li><strong>PII復元機能を持たない</strong>(不可逆マスクのみ・元値隔離テーブル無し)。TeamAgentのTier0復元の盗み見リスクを構造的に排除(APPI・制約6)。</li>
+<li><strong>モデル識別子・実fixture・秘密を成果物に含めない</strong>(§48.7/§51 S10・制約5)。</li>
+<li><strong>Skillに<code>depends_on</code>を持たせない(フラット登録)</strong>。閉路検出問題(既知④)を回避。</li>
+<li><strong>Tier/Memoryは型予約のみで開始</strong>。20人・単一チームでは「本人分離＋単一可視Tier」で当面足りる。</li>
+</ul>
+<h3 id="528">52.8 リスク登録簿</h3>
+<table>
+<thead>
+<tr>
+<th>リスク</th>
+<th>影響</th>
+<th>対策</th>
+<th>Phase</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~§46 Calendar・infra/README §5にDWD記述残存~~ → 本改訂で§46/§43.3はOAuthへ修正済。<strong>infra/READMEは未更新</strong></td>
+<td>認証方針の混乱</td>
+<td>infra/README §5を「各人OAuth＋<code>calendar.readonly</code>」へ更新(実装Phaseで親が編集)</td>
+<td>P0/P2</td>
+</tr>
+<tr>
+<td>Skill Registry早期高度化(entry_points/semver)で過剰設計</td>
+<td>保守困難・非エンジニア理解不能</td>
+<td>in-process辞書のみ。高度化はSkill5本超＋別パッケージ配布要時のP4判断</td>
+<td>P1.5/P4</td>
+</tr>
+<tr>
+<td>OAuth基盤構築時に広いIAM権限を一時付与(§47)</td>
+<td>権限昇格・鍵露出</td>
+<td>作業後に必ずキー無効化＋AdministratorAccess剥奪→最小権限へ(§48.8)</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>外部API(Algrow/Drive/Web)失敗で全体停止(TeamAgent既知②)</td>
+<td>Skill完走不能</td>
+<td>失敗分離→needs_review降格・Tool抜きフォールバックを受入基準化</td>
+<td>P3</td>
+</tr>
+<tr>
+<td>RAG導入時にpgvector前提でコスト膨張(TeamAgent既知①)</td>
+<td>月額急増・運用負荷</td>
+<td>S3+サーバレス/小規模ベクタから。常時稼働DBを初期に持たない</td>
+<td>P3</td>
+</tr>
+<tr>
+<td>法令違反出力(薬機法/景表法/ステマ)が対外資料に混入</td>
+<td>法的リスク・ブランド毀損</td>
+<td><strong>Phase3まで人手レビューで担保(オーナー確定)</strong>→P3で法令チェッカー投入・違反ブロック</td>
+<td>P1-3</td>
+</tr>
+<tr>
+<td>プロンプトインジェクション(メール本文が指示として実行)</td>
+<td>意図しないツール呼出</td>
+<td>本文は「データ」扱い・system優先・allowlist固定(既存§36)。Skill増でも踏襲</td>
+<td>全Phase</td>
+</tr>
+<tr>
+<td>監査ログ改ざん/欠落(AI事業者GL違反)</td>
+<td>コンプラ不適合</td>
+<td>JSONLメタデータのみ・1年保管・改ざん防止。per-user監査をP2追加</td>
+<td>全Phase</td>
+</tr>
+<tr>
+<td>20人並列でBedrock TPM/Gmail quota超過</td>
+<td>遅延・失敗</td>
+<td>TZ分散起動＋Semaphore(4)＋max_budget_usd(§43.3)</td>
+<td>P4</td>
+</tr>
+<tr>
+<td>Skill増殖で非エンジニアが全体像を見失う</td>
+<td>運用・意思決定不能</td>
+<td>Skillカタログ=§24表に一本化。追加レシピ化。CLAUDE.md学習モード継続</td>
+<td>全Phase</td>
+</tr>
+</tbody>
+</table>
+<h3 id="529">52.9 非エンジニア向け用語解説</h3>
+<ul>
+<li><strong>Skill(スキル)</strong>: AIにやらせる1つの仕事の単位(例: 朝メール整理、提案書作成)。決まった型に沿って増やせる。</li>
+<li><strong>Registry(レジストリ)</strong>: Skillの名簿。登録すると土台を直さずに新しい仕事を追加できる。</li>
+<li><strong>Protocol/インターフェース</strong>: 部品どうしの「約束(差込口の形)」。形が合えば中身を差し替えられ、テストもしやすい。</li>
+<li><strong>OAuth(3-legged)/PKCE</strong>: 各社員が自分のGoogleアカウントで「このAIに読取/下書きを許可」と本人同意する仕組み。会社一括委任のDWDより安全。</li>
+<li><strong>DWD(ドメイン全体委任)</strong>: 管理者が会社全体のアカウントを1つの仕組みに委任する方式。我々は不採用。</li>
+<li><strong>RAG(検索拡張生成)</strong>: AIが社内資料を検索し、その内容を根拠に答える仕組み。出典を添えられる。</li>
+<li><strong>ガードレール</strong>: 全体を横断する安全装置。誤送信防止・PIIマスク・法令チェックなど。</li>
+<li><strong>NeverSendGate</strong>: 「絶対に自動送信しない」を二重で守る部品。送信は常に人間が最終実行。</li>
+<li><strong>YAGNI</strong>: 「今いらない機能は作らない」方針。必要になってから足す。</li>
+<li><strong>HITL(人間が最終判断)</strong>: AIは下書き・提案まで。送信や確定は必ず人間が行う。</li>
+<li><strong>監査ログ</strong>: 「誰が・いつ・何を確認したか」の記録。本文や個人情報は残さず1年保管。</li>
+</ul>
+<h3 id="5210-51">52.10 実装着手の入口（§51と接続）</h3>
+<p>本節の実体化は <strong>§51 の S0 から着手</strong>（朝メール緑核）。P1.5以降は本節52.4.3のロードマップに従い、各Skill追加は「<code>skills/&lt;name&gt;/</code> を足して <code>registry.register()</code> を1行」だけで core 改修ゼロ。最初の一歩は S0（pyproject確定＋<code>pip install -e .[dev]</code>）。</p>
 </div>
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
