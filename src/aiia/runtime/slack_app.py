@@ -231,12 +231,12 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
             await client.chat_update(channel=ch, ts=ph_ts,
                                      text=f"Gmailで返信してください: {info.get('gmail_link', '')}")
 
-    # 押下フィードバック＝可視のスレッド返信（@mention付き）。戻り値tsにスタンプを付ける。
+    # 押下フィードバック＝**メインDMに直接**返信（スレッドに埋もれさせない＝[↩取り消す]が必ず見える）。
+    # 戻り値tsに✅等のスタンプを付ける（その同じメッセージのundoでスタンプも外れる）。
     async def _remind_ack(body: Any, client: Any, msg: str, *, undo_tid: Optional[str] = None) -> Optional[str]:
         ch, uid = body["channel"]["id"], body["user"]["id"]
-        ts = body["message"].get("ts")
         blocks = _undo_blocks(undo_tid, msg) if undo_tid else None
-        resp = await client.chat_postMessage(channel=ch, thread_ts=ts, text=f"<@{uid}> {msg}",
+        resp = await client.chat_postMessage(channel=ch, text=f"<@{uid}> {msg}",
                                              blocks=blocks, unfurl_links=False, unfurl_media=False)
         return resp.get("ts")
 
