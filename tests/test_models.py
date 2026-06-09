@@ -12,9 +12,13 @@ def test_resolve_us_region_prefix() -> None:
     assert mid.startswith("us.anthropic.claude-haiku-4-5")
 
 
-def test_resolve_eu_apac_prefix() -> None:
+def test_resolve_region_prefixes() -> None:
     assert mr.resolve_model_id("claude-sonnet-4-6", "eu-central-1").startswith("eu.anthropic.")
-    assert mr.resolve_model_id("claude-sonnet-4-6", "ap-northeast-1").startswith("apac.anthropic.")
+    # 東京(ap-northeast-1)は jp.（4.x系の実在プロファイル・実機検証済）
+    assert mr.resolve_model_id("claude-sonnet-4-6", "ap-northeast-1") == "jp.anthropic.claude-sonnet-4-6"
+    assert mr.resolve_model_id("claude-haiku-4-5", "ap-northeast-1") == "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # その他 ap リージョンは apac.
+    assert mr.resolve_model_id("claude-sonnet-4-6", "ap-south-1").startswith("apac.anthropic.")
 
 
 def test_resolve_no_region_bare() -> None:

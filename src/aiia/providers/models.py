@@ -18,14 +18,19 @@ _DEFAULT_BASE_ID: dict[str, str] = {
     "claude-opus-4-8": "anthropic.claude-opus-4-8",
 }
 
+# Claude 4.x の推論プロファイル接頭辞。東京(ap-northeast-1)は jp.（4.x系・データは日本内）。
+_REGION_OVERRIDE: dict[str, str] = {"ap-northeast-1": "jp."}
 _REGION_PREFIX: dict[str, str] = {"us": "us.", "eu": "eu.", "ap": "apac."}
-_PROFILE_HEADS = frozenset({"us", "eu", "apac"})
+_PROFILE_HEADS = frozenset({"us", "eu", "apac", "jp", "global"})
 
 
 def _profile_prefix(region: str | None) -> str:
     if not region:
         return ""
-    head = region.split("-", 1)[0].lower()
+    r = region.lower()
+    if r in _REGION_OVERRIDE:  # 東京は jp.（4.x系の実在プロファイル）
+        return _REGION_OVERRIDE[r]
+    head = r.split("-", 1)[0]
     return _REGION_PREFIX.get(head, "")
 
 
