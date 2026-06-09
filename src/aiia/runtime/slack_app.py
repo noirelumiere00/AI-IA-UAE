@@ -262,5 +262,10 @@ def run() -> None:  # pragma: no cover - 常駐起動（live）
     rstore = DynamoDbReminderStore(os.environ.get("AIIA_REMINDER_TABLE", "aiia-reminder-state"))
     deps = build_handler_deps(store, reminder_store=rstore)
     app = create_app(deps, connect_redirect_uri=os.environ.get("OAUTH_REDIRECT_URI"))
-    handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
-    asyncio.run(handler.start_async())
+
+    async def _main() -> None:
+        # ハンドラは**実行ループ内**で生成（aiohttp.ClientSession が running loop を要求）。
+        handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+        await handler.start_async()
+
+    asyncio.run(_main())

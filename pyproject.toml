@@ -24,6 +24,7 @@ multiuser = [
   "google-auth-oauthlib>=1.0",
   "slack_sdk>=3.27",
   "slack_bolt>=1.18",
+  "aiohttp>=3.9",        # slack_bolt AsyncApp/Socket Mode が要求
   "fastapi>=0.110",
   "uvicorn>=0.29",
 ]
