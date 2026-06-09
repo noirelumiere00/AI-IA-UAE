@@ -153,15 +153,19 @@ class AnthropicLLM:
         style: Optional[str] = None,
         slack_context: Optional[str] = None,
     ) -> DraftReply:
+        draft_model = self._models["draft"]
+        # effort/adaptive thinking は Opus/Sonnet 4.6+ のみ。Haiku 4.5 は非対応(送ると400)→付けない。
+        extra: dict[str, Any] = {}
+        if "haiku" not in draft_model.lower():
+            extra = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
         msg = self._create(
-            model=self._models["draft"],
+            model=draft_model,
             max_tokens=2048,
             system=prompts.DRAFT_SYSTEM,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
             messages=[{"role": "user", "content": prompts.draft_user_prompt(
                 thread, summary, user, style=style, slack_context=slack_context
             )}],
+            **extra,
         )
         body = "".join(
             getattr(b, "text", "") for b in msg.content if getattr(b, "type", None) == "text"

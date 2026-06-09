@@ -103,16 +103,28 @@ def test_extract_drops_fabricated_deadline() -> None:
     assert len(items) == 1 and items[0].kind == "action"
 
 
-def test_draft_is_text_with_thinking_no_forced_tool() -> None:
+def test_draft_haiku_no_thinking_no_effort_no_forced_tool() -> None:
+    # 既定は全Haiku。Haikuは effort 非対応なので draft は thinking/effort を付けない。
     fb = FakeBedrock(draft_text="お世話になっております。承知しました。")
     from aiia.schemas import ThreadSummary
 
     d = AnthropicLLM(_platform(), client=fb).draft(_thread(), ThreadSummary(thread_id="t1"), _user())
     assert "お世話に" in d.body and d.subject.startswith("Re:")
     kw = fb.calls[-1]
-    assert kw["thinking"]["type"] == "adaptive"
-    assert kw["output_config"]["effort"] == "high"
+    assert "haiku" in kw["model"]
+    assert "thinking" not in kw and "output_config" not in kw  # Haiku=付けない
     assert "tools" not in kw  # draft は強制ツールなし
+
+
+def test_draft_opus_adds_thinking_and_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    # draft を opus に上書きすると thinking/effort が付く（effort対応モデル）。
+    monkeypatch.setenv("AIIA_BEDROCK_MODEL_DRAFT", "us.anthropic.claude-opus-4-8")
+    from aiia.schemas import ThreadSummary
+
+    fb = FakeBedrock(draft_text="本文")
+    AnthropicLLM(_platform(), client=fb).draft(_thread(), ThreadSummary(thread_id="t1"), _user())
+    kw = fb.calls[-1]
+    assert kw["thinking"]["type"] == "adaptive" and kw["output_config"]["effort"] == "high"
 
 
 def test_tool_use_retry_then_error() -> None:

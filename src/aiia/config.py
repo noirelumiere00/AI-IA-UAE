@@ -19,9 +19,10 @@ class ProviderProfile(BaseModel):
 
 
 class ModelTier(BaseModel):
+    # 既定は全工程 Haiku（コスト/速度優先）。必要なら platform.yaml / env で上書き。
     classify: str = "claude-haiku-4-5"
-    summarize: str = "claude-sonnet-4-6"
-    draft: str = "claude-opus-4-8"
+    summarize: str = "claude-haiku-4-5"
+    draft: str = "claude-haiku-4-5"
 
 
 class PlatformConfig(BaseModel):

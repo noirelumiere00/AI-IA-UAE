@@ -4,7 +4,7 @@ profiles:
   bedrock:
     name: bedrock
     region: ap-northeast-1
-models:
+models:   # 全工程 Haiku（コスト/速度優先・ユーザー指定）
   classify: claude-haiku-4-5
-  summarize: claude-sonnet-4-6
-  draft: claude-opus-4-8
+  summarize: claude-haiku-4-5
+  draft: claude-haiku-4-5
