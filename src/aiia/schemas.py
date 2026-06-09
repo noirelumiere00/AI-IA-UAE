@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 Tone = Literal["neutral", "urgent", "frustrated", "positive", "formal"]
 PriorityLabel = Literal["緊急", "高", "中", "低"]
 Handling = Literal["定型", "非定型"]
+RecipientKind = Literal["to", "cc", "unknown"]  # 直接宛(To)/情報共有(Ccのみ)/不明
 
 
 class Category(str, Enum):
@@ -89,6 +90,7 @@ class ClassificationResult(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     is_vip: bool = False
     is_actionable: bool = False  # 返信/対応が必要(質問・依頼・締切・名指し)。一般/FYIはFalse。
+    recipient_kind: RecipientKind = "unknown"  # 本人が To(直接) か Cc のみ(情報共有) か
     priority_label: PriorityLabel = "中"
     handling: Handling = "非定型"
     amount_jpy: Optional[int] = None

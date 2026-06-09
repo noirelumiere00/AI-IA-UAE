@@ -52,6 +52,9 @@ class Hints:
     is_client: bool = False
     is_newsletter: bool = False
     is_actionable: bool = False
+    is_mailing_list: bool = False
+    is_to: bool = False  # 本人が To（直接宛）
+    is_cc: bool = False  # 本人が Cc のみ（情報共有）
     is_confidential: bool = False
     amount_jpy: Optional[int] = None
     key_person: Optional[str] = None
@@ -116,14 +119,26 @@ def heuristic_signals(thread: EmailThread, user: "UserConfig") -> Hints:
     headers = {}
     if thread.latest:
         headers = {k.lower(): v for k, v in thread.latest.headers.items()}
-    h.is_newsletter = "list-unsubscribe" in headers or "noreply" in sender or "no-reply" in sender
-    # 要返信/対応の判定：依頼/質問語 or 緊急語 or 本人名指し。ただしニュースレター/完了連絡は除外。
+    # メーリングリスト/一括配信（List-Id or Precedence: list/bulk）→ ニュースレター扱いで畳む
+    h.is_mailing_list = "list-id" in headers or headers.get("precedence", "").lower() in {"list", "bulk"}
+    h.is_newsletter = (
+        "list-unsubscribe" in headers or h.is_mailing_list
+        or "noreply" in sender or "no-reply" in sender
+    )
+    # 本人が To（直接宛）か Cc のみ（情報共有）か。user_id＝本人メール（本番）。
+    email = (user.user_id or "").lower()
+    if email and "@" in email:
+        h.is_to = email in headers.get("to", "").lower()
+        h.is_cc = (email in headers.get("cc", "").lower()) and not h.is_to
+    # 要返信/対応の判定。本人名指し(display_name)は強い対応シグナル＝NL/MLでも昇格(安全弁)。
+    # 汎用的な依頼/緊急語は NL/ML では actionable にしない（マーケコピーの「今すぐご確認」対策）。
     has_action_kw = _any(low, [w.lower() for w in ACTIONABLE_KEYWORDS]) is not None
     named = bool(user.display_name) and user.display_name in text
     completed = _any(low, [w.lower() for w in COMPLETION_KEYWORDS]) is not None
-    h.is_actionable = (has_action_kw or h.has_urgent_kw or named) and not h.is_newsletter and not completed
+    generic_action = has_action_kw or h.has_urgent_kw
+    h.is_actionable = (named or (generic_action and not h.is_newsletter)) and not completed
     if h.is_actionable:
-        h.matched.append("要返信/対応の語")
+        h.matched.append("要返信/対応（名指し含む）")
     h.is_confidential = bool(CONFIDENTIAL_LABELS & {lbl.lower() for lbl in thread.labels})
     h.amount_jpy = _parse_amount(text)
     kp = _KEY_PERSON_RE.search(text)
@@ -136,6 +151,7 @@ def classify_from_hints(hints: Hints) -> ClassificationResult:
     reasons = list(hints.matched)
     priority_label = "緊急" if hints.has_urgent_kw else ("高" if hints.is_vip else "中")
     handling: str = "非定型"
+    recipient_kind = "to" if hints.is_to else ("cc" if hints.is_cc else "unknown")
 
     def res(cat: Category, conf: float, why: str, review: bool = False) -> ClassificationResult:
         return ClassificationResult(
@@ -144,6 +160,7 @@ def classify_from_hints(hints: Hints) -> ClassificationResult:
             reasons=reasons + [why],
             is_vip=hints.is_vip,
             is_actionable=hints.is_actionable,
+            recipient_kind=recipient_kind,  # type: ignore[arg-type]
             priority_label=priority_label,  # type: ignore[arg-type]
             handling=handling,  # type: ignore[arg-type]
             amount_jpy=hints.amount_jpy,

@@ -63,6 +63,40 @@ def test_actionable_false_on_newsletter_and_completion() -> None:
     assert heuristic_signals(done, _user()).is_actionable is False  # 完了連絡
 
 
+# ── メーリングリスト（List-Id/Precedence）→ NEWSLETTER畳み＋安全弁 ──────────────
+def test_mailing_list_via_list_id_is_newsletter() -> None:
+    th = _thread(sender="team@vectorinc.co.jp", domain="vectorinc.co.jp", subject="部署連絡",
+                 body="共有です", headers={"List-Id": "<team.vectorinc.co.jp>"})
+    h = heuristic_signals(th, _user())
+    assert h.is_mailing_list is True
+    assert classify_from_hints(h).category == Category.NEWSLETTER  # ML→畳み対象
+
+
+def test_mailing_list_actionable_escalates_via_should_show() -> None:
+    # ML でも 名指し/締切なら is_actionable=True → _should_show で個別に昇格（安全弁）
+    th = _thread(sender="all@vectorinc.co.jp", domain="vectorinc.co.jp", subject="至急のお願い",
+                 body="小俣翔碁さん 本日中にご確認いただけますか？",
+                 headers={"List-Id": "<all.vectorinc.co.jp>"})
+    cls = classify_from_hints(heuristic_signals(th, _user()))
+    assert cls.category == Category.NEWSLETTER and cls.is_actionable is True
+    assert _should_show(cls) is True  # 畳まず出す
+
+
+# ── To / Cc 分離 ─────────────────────────────────────────────────────────────
+def test_to_vs_cc_recipient_kind() -> None:
+    me = "s-komata@vectorinc.co.jp"
+    u = UserConfig(user_id=me, display_name="小俣翔碁", internal_domain="vectorinc.co.jp")
+    to_th = _thread(sender="x@a.example", domain="a.example", subject="ご確認",
+                    body="ご確認ください", headers={"To": me, "Cc": "other@a.example"})
+    cc_th = _thread(sender="x@a.example", domain="a.example", subject="共有",
+                    body="参考まで", headers={"To": "boss@a.example", "Cc": f"team@a.example, {me}"})
+    assert heuristic_signals(to_th, u).is_to is True
+    hcc = heuristic_signals(cc_th, u)
+    assert hcc.is_cc is True and hcc.is_to is False
+    assert classify_from_hints(heuristic_signals(to_th, u)).recipient_kind == "to"
+    assert classify_from_hints(hcc).recipient_kind == "cc"
+
+
 # ── 表示ポリシー _should_show ─────────────────────────────────────────────────
 def _cls(cat: Category, *, actionable: bool = False, vip: bool = False) -> ClassificationResult:
     return ClassificationResult(category=cat, confidence=0.9, is_actionable=actionable, is_vip=vip)

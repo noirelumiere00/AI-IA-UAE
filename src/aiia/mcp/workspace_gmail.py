@@ -18,7 +18,7 @@ from aiia.auth.token_store import OAuthToken
 from aiia.mcp.registry import LABEL_PREFIX
 from aiia.schemas import EmailMessage, EmailThread
 
-_META_HEADERS = ["From", "Subject", "Date", "List-Unsubscribe"]
+_META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Id", "Precedence"]
 
 
 def _header(headers: list[dict], name: str) -> str:

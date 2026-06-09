@@ -55,6 +55,15 @@ def _group(items: list[DigestItem]) -> dict[Category, list[DigestItem]]:
     return groups
 
 
+def _split_to_cc(items: list[DigestItem]) -> tuple[list[DigestItem], list[DigestItem]]:
+    """To（直接宛＋要返信Ccは昇格）と Cc（情報共有のみ）に分割。"""
+    cc = [it for it in items
+          if it.classification.recipient_kind == "cc" and not it.classification.is_actionable]
+    cc_ids = {id(it) for it in cc}
+    to = [it for it in items if id(it) not in cc_ids]
+    return to, cc
+
+
 def _deadline_note(it: DigestItem) -> str:
     dls = [a for a in it.summary.action_items if a.kind == "deadline" and a.source_quote]
     return f"    ⏰ 締切言及: {dls[0].source_quote[:40]}" if dls else ""
@@ -71,22 +80,31 @@ def render_digest_text(d: Digest) -> str:
         lines.append("\n☕ 静かな朝です — 新着の未読メールはありません。")
         return "\n".join(lines)
 
-    groups = _group(d.items)
-    for cat in sorted(groups, key=lambda c: BASE_PRIORITY[c]):
-        its = groups[cat]
-        lines.append(f"\n{CATEGORY_EMOJI[cat]} {cat.value} ({len(its)})")
-        for it in its:
-            flag = " ⚠️要確認" if it.needs_review else ""
-            lines.append(f"  • {it.sender} ・ {it.subject}{flag}")
-            if it.summary.one_liner:
-                lines.append(f"    要約: {it.summary.one_liner}")
-            dl = _deadline_note(it)
-            if dl:
-                lines.append(dl)
-            if it.draft:
-                lines.append(f"    📝 下書きプレビュー作成済（未送信・敬語Lv{it.draft.keigo_level}）")
-            if it.gmail_link:
-                lines.append(f"    ↗ {it.gmail_link}")
+    def _emit(items: list[DigestItem]) -> None:
+        groups = _group(items)
+        for cat in sorted(groups, key=lambda c: BASE_PRIORITY[c]):
+            its = groups[cat]
+            lines.append(f"\n{CATEGORY_EMOJI[cat]} {cat.value} ({len(its)})")
+            for it in its:
+                flag = " ⚠️要確認" if it.needs_review else ""
+                lines.append(f"  • {it.sender} ・ {it.subject}{flag}")
+                if it.summary.one_liner:
+                    lines.append(f"    要約: {it.summary.one_liner}")
+                dl = _deadline_note(it)
+                if dl:
+                    lines.append(dl)
+                if it.draft:
+                    lines.append(f"    📝 下書きプレビュー作成済（未送信・敬語Lv{it.draft.keigo_level}）")
+                if it.gmail_link:
+                    lines.append(f"    ↗ {it.gmail_link}")
+
+    to_items, cc_items = _split_to_cc(d.items)
+    if to_items:
+        lines.append("\n━━ 📥 あなた宛（To・要対応）━━")
+        _emit(to_items)
+    if cc_items:
+        lines.append("\n━━ 👥 CC（情報共有・参考）━━")
+        _emit(cc_items)
 
     if d.quiet_counts:
         folded = " ・ ".join(
@@ -119,30 +137,42 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
         blocks.append(_section("☕ *静かな朝です* — 新着の未読メールはありません。"))
         return blocks
 
-    groups = _group(d.items)
     truncated = 0
-    for cat in sorted(groups, key=lambda c: BASE_PRIORITY[c]):
-        its = groups[cat]
+
+    def _emit_blocks(items: list[DigestItem], header: str) -> None:
+        nonlocal truncated
+        if not items:
+            return
         if len(blocks) >= _MAX_BLOCKS - 2:
-            truncated += len(its)
-            continue
-        blocks.append(_section(f"*{CATEGORY_EMOJI[cat]} {cat.value} ({len(its)})*"))
-        for it in its:
+            truncated += len(items)
+            return
+        blocks.append(_section(header))
+        for cat in sorted(_group(items), key=lambda c: BASE_PRIORITY[c]):
+            its = _group(items)[cat]
             if len(blocks) >= _MAX_BLOCKS - 2:
-                truncated += 1
+                truncated += len(its)
                 continue
-            flag = " ⚠️要確認" if it.needs_review else ""
-            draft_line = "\n📝 下書きプレビュー作成済（未送信）" if it.draft else ""
-            dl = _deadline_note(it).strip()
-            dl_line = f"\n{dl}" if dl else ""
-            link = f"\n<{it.gmail_link}|↗ Gmailで開く>" if it.gmail_link else ""
-            blocks.append(_section(
-                f"*{it.sender}*{flag}\n件名: {it.subject}\n要約: {it.summary.one_liner}{dl_line}{draft_line}{link}"
-            ))
-            # 下書きのある項目だけ操作ボタン（編集/削除/送信）。送信は2段確認の1段目付き。
-            # value=Gmail下書きID(M2ハンドラが drafts.update/send/delete に使用)・無ければthread_id。
-            if interactive and it.draft and len(blocks) < _MAX_BLOCKS - 2:
-                blocks.append(_item_actions(it.gmail_draft_id or it.thread_id))
+            blocks.append(_section(f"*{CATEGORY_EMOJI[cat]} {cat.value} ({len(its)})*"))
+            for it in its:
+                if len(blocks) >= _MAX_BLOCKS - 2:
+                    truncated += 1
+                    continue
+                flag = " ⚠️要確認" if it.needs_review else ""
+                draft_line = "\n📝 下書きプレビュー作成済（未送信）" if it.draft else ""
+                dl = _deadline_note(it).strip()
+                dl_line = f"\n{dl}" if dl else ""
+                link = f"\n<{it.gmail_link}|↗ Gmailで開く>" if it.gmail_link else ""
+                blocks.append(_section(
+                    f"*{it.sender}*{flag}\n件名: {it.subject}\n要約: {it.summary.one_liner}{dl_line}{draft_line}{link}"
+                ))
+                # 下書きのある項目だけ操作ボタン（編集/削除/送信）。送信は2段確認の1段目付き。
+                # value=Gmail下書きID(M2ハンドラが drafts.update/send/delete に使用)・無ければthread_id。
+                if interactive and it.draft and len(blocks) < _MAX_BLOCKS - 2:
+                    blocks.append(_item_actions(it.gmail_draft_id or it.thread_id))
+
+    to_items, cc_items = _split_to_cc(d.items)
+    _emit_blocks(to_items, "*📥 あなた宛（To・要対応）*")
+    _emit_blocks(cc_items, "*👥 CC（情報共有・参考）*")
 
     quiet_txt = " ・ ".join(
         f"{CATEGORY_EMOJI[c]} {c.value} ({n})"

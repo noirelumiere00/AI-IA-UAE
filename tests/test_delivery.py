@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from aiia.delivery import render_digest_text, render_slack_blocks
 from aiia.mcp.fake import FakeMCPToolset
 from aiia.pipeline import PipelineDeps, run
-from aiia.schemas import Digest
+from aiia.schemas import Digest, DigestItem
 
 
 def test_text_has_header_categories_and_unsent(
@@ -56,3 +56,29 @@ def test_interactive_buttons_on_draft_items(
     send = next(e for e in a0["elements"] if e["action_id"] == ACTION_SEND)
     assert send["value"]  # thread_id を載せる（ハンドラが対象特定）
     assert "confirm" in send  # 送信は2段確認の1段目（Slackネイティブ確認）
+
+
+def _ditem(rk: str, *, actionable: bool = False) -> DigestItem:
+    from aiia.schemas import Category, ClassificationResult, ThreadSummary
+    return DigestItem(
+        thread_id="t" + rk, category=Category.CLIENT_NORMAL, priority=30,
+        subject="件名", sender="x@a.example", summary=ThreadSummary(thread_id="t"),
+        classification=ClassificationResult(
+            category=Category.CLIENT_NORMAL, recipient_kind=rk, is_actionable=actionable),  # type: ignore[arg-type]
+    )
+
+
+def test_split_to_cc_promotes_actionable_cc() -> None:
+    from aiia.delivery.slack import _split_to_cc
+    to_only, cc_fyi, cc_act, unknown = (
+        _ditem("to"), _ditem("cc"), _ditem("cc", actionable=True), _ditem("unknown"))
+    to, cc = _split_to_cc([to_only, cc_fyi, cc_act, unknown])
+    assert cc == [cc_fyi]  # 非アクションCcだけ情報共有グループ
+    assert {id(x) for x in to} == {id(to_only), id(cc_act), id(unknown)}  # 要返信Cc/不明はTo側
+
+
+def test_text_separates_to_and_cc_groups() -> None:
+    d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
+               items=[_ditem("to"), _ditem("cc")])
+    txt = render_digest_text(d)
+    assert "あなた宛（To" in txt and "CC（情報共有" in txt
