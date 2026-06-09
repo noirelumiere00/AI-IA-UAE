@@ -26,6 +26,15 @@ FINANCE_LEGAL_KEYWORDS = ["契約", "請求", "見積", "nda", "守秘", "法務
 # 取引先/ベンダー文脈
 VENDOR_KEYWORDS = ["請求書", "見積書", "発注", "納品", "invoice", "purchase order", "po番号"]
 CONFIDENTIAL_LABELS = {"confidential", "機密", "社外秘"}
+# 要返信/対応の語（質問・依頼）。これがあれば is_actionable 寄り。
+ACTIONABLE_KEYWORDS = [
+    "ご返信", "返信ください", "ご確認", "確認をお願い", "ご回答", "ご対応", "対応をお願い",
+    "お願いします", "お願いいたします", "お願い致します", "ご教示", "ご相談", "ご検討",
+    "いただけますか", "いただけますでしょうか", "可能でしょうか", "依頼", "要返信",
+    "please", "could you", "let me know", "?", "？",
+]
+# 完了/クローズ（actionable を打ち消す＝対応不要のFYI）。
+COMPLETION_KEYWORDS = ["終了しました", "完了しました", "解決しました", "クローズしました"]
 
 _AMOUNT_RE = re.compile(r"([0-9０-９,，]+)\s*(万円|百万|円)")
 _KEY_PERSON_RE = re.compile(r"(社長|部長|課長|本部長|cfo|ceo|coo|役員|取締役)", re.IGNORECASE)
@@ -42,6 +51,7 @@ class Hints:
     is_internal: bool = False
     is_client: bool = False
     is_newsletter: bool = False
+    is_actionable: bool = False
     is_confidential: bool = False
     amount_jpy: Optional[int] = None
     key_person: Optional[str] = None
@@ -107,6 +117,13 @@ def heuristic_signals(thread: EmailThread, user: "UserConfig") -> Hints:
     if thread.latest:
         headers = {k.lower(): v for k, v in thread.latest.headers.items()}
     h.is_newsletter = "list-unsubscribe" in headers or "noreply" in sender or "no-reply" in sender
+    # 要返信/対応の判定：依頼/質問語 or 緊急語 or 本人名指し。ただしニュースレター/完了連絡は除外。
+    has_action_kw = _any(low, [w.lower() for w in ACTIONABLE_KEYWORDS]) is not None
+    named = bool(user.display_name) and user.display_name in text
+    completed = _any(low, [w.lower() for w in COMPLETION_KEYWORDS]) is not None
+    h.is_actionable = (has_action_kw or h.has_urgent_kw or named) and not h.is_newsletter and not completed
+    if h.is_actionable:
+        h.matched.append("要返信/対応の語")
     h.is_confidential = bool(CONFIDENTIAL_LABELS & {lbl.lower() for lbl in thread.labels})
     h.amount_jpy = _parse_amount(text)
     kp = _KEY_PERSON_RE.search(text)
@@ -126,6 +143,7 @@ def classify_from_hints(hints: Hints) -> ClassificationResult:
             confidence=conf,
             reasons=reasons + [why],
             is_vip=hints.is_vip,
+            is_actionable=hints.is_actionable,
             priority_label=priority_label,  # type: ignore[arg-type]
             handling=handling,  # type: ignore[arg-type]
             amount_jpy=hints.amount_jpy,
@@ -147,10 +165,11 @@ def classify_from_hints(hints: Hints) -> ClassificationResult:
         return res(Category.CLIENT_NORMAL, 0.8, "クライアント（非緊急）")
     if hints.is_vendor:
         return res(Category.VENDOR_PARTNER, 0.78, "取引先/請求文脈")
-    if hints.is_internal:
-        return res(Category.INTERNAL, 0.8, "社内ドメイン")
+    # ニュースレターを社内ドメインより先に判定（社内エイリアスの一括配信が INTERNAL 化するのを防ぐ）
     if hints.is_newsletter:
         return res(Category.NEWSLETTER, 0.85, "一括配信/List-Unsubscribe")
+    if hints.is_internal:
+        return res(Category.INTERNAL, 0.8, "社内ドメイン")
     # 未該当: 低信頼で要確認
     return res(Category.CLIENT_NORMAL, 0.4, "ヒューリスティック非該当（要確認）", review=True)
 

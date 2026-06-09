@@ -28,7 +28,10 @@ def test_live_records_drafts_labels_no_send(
     kinds = [c[0] for c in tools.calls]
     assert "create_draft" in kinds and "label_thread" in kinds
     assert not any("send_message" in k for k in kinds)  # K5: 実送信は決して呼ばれない
-    assert res.drafts_created == 2 and res.labels_applied == 5
+    # 新ポリシー：要返信/重要だけ個別表示＋ラベル付与（一般メールは件数畳みで非表示・非ラベル）
+    assert res.drafts_created == 2
+    assert res.labels_applied == len(res.digest.items)  # 表示した項目だけラベル付与
+    assert res.digest.quiet_counts  # 一般メールは件数に畳まれている
 
 
 def test_existing_draft_is_skipped(

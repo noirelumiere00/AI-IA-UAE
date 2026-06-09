@@ -88,8 +88,12 @@ def render_digest_text(d: Digest) -> str:
             if it.gmail_link:
                 lines.append(f"    ↗ {it.gmail_link}")
 
-    for cat, n in sorted(d.quiet_counts.items(), key=lambda kv: BASE_PRIORITY[kv[0]]):
-        lines.append(f"\n{CATEGORY_EMOJI[cat]} {cat.value} ({n}) ・ 折りたたみ（件数のみ）")
+    if d.quiet_counts:
+        folded = " ・ ".join(
+            f"{CATEGORY_EMOJI[cat]} {cat.value} {n}"
+            for cat, n in sorted(d.quiet_counts.items(), key=lambda kv: BASE_PRIORITY[kv[0]])
+        )
+        lines.append(f"\n📥 一般メール（件数のみ・要返信/重要以外）: {folded}")
 
     lines.append("\n⏱ 下書きは未送信です。Gmailで確認のうえ、送信は人が行ってください。")
     return "\n".join(lines)
@@ -145,7 +149,7 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
         for c, n in sorted(d.quiet_counts.items(), key=lambda kv: BASE_PRIORITY[kv[0]])
     )
     if quiet_txt:
-        blocks.append(_section(f"折りたたみ（件数のみ）: {quiet_txt}"))
+        blocks.append(_section(f"📥 *一般メール（件数のみ・要返信/重要以外）*: {quiet_txt}"))
     if truncated:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
             "text": f"＋{truncated}件は表示省略 — Gmailで確認してください"}]})

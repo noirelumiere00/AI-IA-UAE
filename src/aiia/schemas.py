@@ -88,6 +88,7 @@ class ClassificationResult(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     reasons: list[str] = Field(default_factory=list)
     is_vip: bool = False
+    is_actionable: bool = False  # 返信/対応が必要(質問・依頼・締切・名指し)。一般/FYIはFalse。
     priority_label: PriorityLabel = "中"
     handling: Handling = "非定型"
     amount_jpy: Optional[int] = None

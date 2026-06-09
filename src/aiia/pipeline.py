@@ -35,6 +35,16 @@ from aiia.schemas import (
 # ヒューリスティックの自信がこの値以上なら LLM 再分類しない（コスト最小化＝2段分類）。
 HEURISTIC_CONFIDENCE_THRESHOLD = 0.8
 
+# 個別表示する「重要」カテゴリ（要返信でなくても出す＝顧客/VIP/プレス/金額）。
+IMPORTANT_CATS = frozenset(
+    {Category.CLIENT_URGENT, Category.CLIENT_NORMAL, Category.PRESS_MEDIA, Category.FINANCE_LEGAL}
+)
+
+
+def _should_show(cls: ClassificationResult) -> bool:
+    """個別表示するか（要返信 or 重要cat or VIP）。それ以外は『一般メール』として件数畳み。"""
+    return cls.is_actionable or cls.is_vip or cls.category in IMPORTANT_CATS
+
 
 @dataclass
 class PipelineDeps:
@@ -123,8 +133,9 @@ def run(deps: PipelineDeps) -> AgentResult:
             if audit:
                 audit.record("thread_classified", thread_id=thread.thread_id, category=cls.category.value)
 
-            # quiet カテゴリ（ニュースレター等）は本体に出さず件数だけ
-            if cls.category.value in quiet_cats:
+            # 表示ポリシー：要返信/重要だけ個別表示。一般メール(FYI/通知/NL)は件数だけ畳む。
+            # quiet_categories(config)は「常に畳む」ハード上書きとして優先。
+            if cls.category.value in quiet_cats or not _should_show(cls):
                 quiet_counts[cls.category] = quiet_counts.get(cls.category, 0) + 1
                 continue
 
