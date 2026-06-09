@@ -23,6 +23,7 @@ from aiia.safety.audit import AuditLog
 from aiia.safety.redaction import find_secrets, redact
 from aiia.schemas import (
     AgentResult,
+    CalendarEvent,
     Category,
     ClassificationResult,
     Digest,
@@ -60,6 +61,25 @@ class PipelineDeps:
     grounding_provider: Optional[Callable[[EmailThread], Optional[str]]] = None
     # M1 hardening: per-user/日 のコスト上限（LLMが cost_usd を持つ場合に超過で draft をスキップ）。
     max_budget_usd: Optional[float] = None
+
+
+def _fetch_today_events(deps: PipelineDeps) -> tuple[list[CalendarEvent], bool]:
+    """今日の予定を取得。戻り値 (events, failed)。calendar無効/未配線は ([], False)、
+    取得失敗は ([], True)（0件＝予定なし と区別＝連携切れを『暇』と誤認させない）。fail-safe。"""
+    cal_cfg = getattr(deps.agent, "calendar", None)
+    cal = getattr(deps.tools, "calendar", None)
+    if cal_cfg is None or not cal_cfg.enabled or cal is None:
+        return [], False
+    try:
+        events = list(cal.list_today_events())
+    except Exception:  # noqa: BLE001 — カレンダー失敗でメール本処理は止めない
+        return [], True
+    # 件名privacy：show_titles=False は件名を伏せる。redact は秘密(鍵/カード)を消す保険(機微語は別途toggleで)。
+    if not cal_cfg.show_titles:
+        events = [e.model_copy(update={"title": ""}) for e in events]
+    else:
+        events = [e.model_copy(update={"title": redact(e.title)}) for e in events]
+    return events, False
 
 
 def _fetch_threads(deps: PipelineDeps) -> list[EmailThread]:
@@ -115,6 +135,7 @@ def run(deps: PipelineDeps) -> AgentResult:
         audit.record("run_started")
 
     threads = _fetch_threads(deps)
+    calendar_events, calendar_failed = _fetch_today_events(deps)
     draft_cats = set(deps.agent.draft_categories)
     quiet_cats = set(deps.user.quiet_categories)
 
@@ -202,6 +223,8 @@ def run(deps: PipelineDeps) -> AgentResult:
         items=items,
         counts_by_category=counts,
         quiet_counts=quiet_counts,
+        calendar_events=calendar_events,
+        calendar_failed=calendar_failed,
         processed=len(threads),
         elapsed_seconds=round(time.monotonic() - start, 3),
     )

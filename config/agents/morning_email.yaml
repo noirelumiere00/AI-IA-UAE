@@ -6,4 +6,8 @@ draft_categories:   # この2カテゴリのみ返信下書きを作る（下書
 delivery:
   channel: slack_dm   # slack_dm | slack_channel | email_draft | canvas
   mode: draft         # draft（人が送信） | send（要承認・既定では使わない）
+calendar:
+  enabled: true       # 今日の予定をダイジェストに表示（読み取りのみ）
+  show_titles: true   # false で件名を伏せ「HH:MM 予定あり」だけ（privacy配慮）
+  max_events: 6       # これ超で「次＋直近3件＋ほかN件」に件数fold
 max_threads: 50

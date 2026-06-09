@@ -141,12 +141,24 @@ class DigestItem(BaseModel):
     needs_review: bool = False
 
 
+class CalendarEvent(BaseModel):
+    event_id: str = ""
+    title: str = ""
+    start: Optional[datetime] = None
+    end: Optional[datetime] = None
+    all_day: bool = False
+    # accepted / tentative / needsAction / declined（declined は表示前に除外）
+    response_status: str = "accepted"
+
+
 class Digest(BaseModel):
     generated_at: datetime
     user_id: str
     items: list[DigestItem] = Field(default_factory=list)
     counts_by_category: dict[Category, int] = Field(default_factory=dict)
     quiet_counts: dict[Category, int] = Field(default_factory=dict)
+    calendar_events: list[CalendarEvent] = Field(default_factory=list)
+    calendar_failed: bool = False  # カレンダー取得失敗（0件＝予定なし と区別）
     processed: int = 0
     elapsed_seconds: float = 0.0
 

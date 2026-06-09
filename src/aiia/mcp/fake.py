@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from aiia.schemas import EmailMessage, EmailThread
+from aiia.schemas import CalendarEvent, EmailMessage, EmailThread
 
 _FIXED = datetime(2026, 6, 8, 7, 0, tzinfo=timezone.utc)
+_JST = timezone(timedelta(hours=9))
 
 
 def _thread(
@@ -131,10 +132,31 @@ class FakeSlack:
         return "slack_draft_1"
 
 
+def default_events() -> list[CalendarEvent]:
+    """今日の予定 fixture（時刻つき2件 + 終日1件 + 未応答1件）。"""
+    d = datetime(2026, 6, 8, tzinfo=_JST)
+    return [
+        CalendarEvent(event_id="e1", title="タテガタ集客定例",
+                      start=d.replace(hour=9, minute=30), end=d.replace(hour=10), response_status="accepted"),
+        CalendarEvent(event_id="e2", title="商談 ◯◯社",
+                      start=d.replace(hour=14), end=d.replace(hour=15), response_status="needsAction"),
+        CalendarEvent(event_id="e3", title="健康診断", start=d, all_day=True, response_status="accepted"),
+    ]
+
+
+@dataclass
+class FakeCalendar:
+    events: list[CalendarEvent] = field(default_factory=default_events)
+
+    def list_today_events(self, now: Optional[datetime] = None) -> list[CalendarEvent]:
+        return list(self.events)
+
+
 @dataclass
 class FakeMCPToolset:
     gmail: FakeGmail = field(default_factory=FakeGmail)
     slack: FakeSlack = field(default_factory=FakeSlack)
+    calendar: Optional[FakeCalendar] = field(default_factory=FakeCalendar)
 
     @property
     def calls(self) -> list[tuple]:

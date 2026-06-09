@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional, Protocol, runtime_checkable
 
-from aiia.schemas import EmailThread
+from aiia.schemas import CalendarEvent, EmailThread
 
 
 @runtime_checkable
@@ -43,6 +43,14 @@ class SlackTools(Protocol):
 
 
 @runtime_checkable
+class CalendarTools(Protocol):
+    """カレンダーは**読み取りのみ**（events.insert/delete/update は持たせない＝書込防止）。"""
+
+    def list_today_events(self) -> list[CalendarEvent]: ...
+    """本人カレンダー(primary)の今日の予定（時刻順）。取得不可は例外を投げる。"""
+
+
+@runtime_checkable
 class MCPToolset(Protocol):
     """道具一式。gmail / slack をネスト保持（tools.gmail.search_threads のように使う）。
 
@@ -54,3 +62,5 @@ class MCPToolset(Protocol):
     def gmail(self) -> GmailTools: ...
     @property
     def slack(self) -> SlackTools: ...
+    @property
+    def calendar(self) -> Optional[CalendarTools]: ...

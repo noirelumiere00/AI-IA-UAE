@@ -36,6 +36,12 @@ class DeliveryConfig(BaseModel):
     mode: str = "draft"        # draft（人間承認） | send（要承認フラグ）
 
 
+class CalendarConfig(BaseModel):
+    enabled: bool = True
+    show_titles: bool = True   # False で「HH:MM 予定あり（件名非表示）」＝privacy配慮
+    max_events: int = 6        # これ超で「次＋直近3件＋ほかN件」に件数fold
+
+
 class MorningEmailConfig(BaseModel):
     gmail_query: str = "is:unread newer_than:1d -category:promotions -category:social"
     categories: list[str] = Field(
@@ -46,6 +52,7 @@ class MorningEmailConfig(BaseModel):
     )
     draft_categories: list[str] = Field(default_factory=lambda: ["CLIENT_URGENT", "PRESS_MEDIA"])
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
+    calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     model_overrides: dict[str, str] = Field(default_factory=dict)
     schedule: dict = Field(default_factory=dict)
     max_threads: int = 50

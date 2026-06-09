@@ -82,3 +82,18 @@ def test_text_separates_to_and_cc_groups() -> None:
                items=[_ditem("to"), _ditem("cc")])
     txt = render_digest_text(d)
     assert "あなた宛（To" in txt and "CC（情報共有" in txt
+
+
+def test_block_budget_protects_to_over_calendar() -> None:
+    # Toを大量に積んでも≤49・To見出しは残り、カレンダーは予算切れで degrade（出ない）する
+    from aiia.schemas import CalendarEvent
+    many_to = [_ditem("to") for _ in range(60)]
+    d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
+               items=many_to,
+               calendar_events=[CalendarEvent(event_id="c", title="定例",
+                                              start=datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc))])
+    blocks = render_slack_blocks(d, interactive=True)
+    assert len(blocks) <= 49
+    assert any("あなた宛" in str(b) for b in blocks)           # To は必ず出る（予算先取り）
+    assert any("表示省略" in str(b) for b in blocks)            # 溢れは省略表記
+    assert not any("今日の予定" in str(b) for b in blocks)      # カレンダーは予算切れで degrade

@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from aiia.auth.google_creds import build_user_credentials
 from aiia.auth.token_store import OAuthToken
+from aiia.mcp.workspace_calendar import WorkspaceCalendar
 from aiia.mcp.registry import LABEL_PREFIX
 from aiia.schemas import EmailMessage, EmailThread
 
@@ -165,14 +166,18 @@ class _NoOpSlack:
 
 @dataclass
 class WorkspaceGmailToolset:
-    """本番 MCPToolset: gmail=本人実Gmail / slack=No-op(配信は slack_client)。"""
+    """本番 MCPToolset: gmail=本人実Gmail / slack=No-op(配信は slack_client) / calendar=本人カレンダー(読取)。"""
 
     gmail: WorkspaceGmail
     slack: _NoOpSlack = field(default_factory=_NoOpSlack)
+    calendar: Optional["WorkspaceCalendar"] = None
 
     @classmethod
     def from_token(cls, token: OAuthToken, *, service: Any = None) -> "WorkspaceGmailToolset":
-        return cls(gmail=WorkspaceGmail(token, service=service))
+        return cls(
+            gmail=WorkspaceGmail(token, service=service),
+            calendar=WorkspaceCalendar(token),
+        )
 
     @property
     def calls(self) -> list[tuple]:
