@@ -37,8 +37,8 @@ def gmail_link(thread_id: str) -> str:
 
 
 def is_unreplied(thread: EmailThread) -> bool:
-    """本人が未返信か。SENT/Auto-Submitted/bulk/noreply で誤検知を排除。"""
-    m = thread.latest
+    """本人が未返信か。下書きは無視し、SENT/Auto-Submitted/bulk/noreply で誤検知を排除。"""
+    m = thread.latest_real  # 作りかけ下書きを除いた実状態で判定
     if m is None:
         return False
     if thread.latest_is_from_self:  # 本人が最後に送った＝返信済み（SENTラベル）
@@ -155,7 +155,7 @@ def compute_reminders(
             continue
         if dec.action != "show":
             continue
-        m = thread.latest
+        m = thread.last_inbound  # 差出人/手がかりは相手の最新（自分の下書きを除外）
         views.append(ReminderView(
             thread_id=rec.thread_id,
             category=Category(rec.category) if rec.category in Category._value2member_map_ else Category.CLIENT_NORMAL,

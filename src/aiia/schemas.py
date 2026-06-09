@@ -70,25 +70,41 @@ class EmailThread(BaseModel):
         return self.messages[-1] if self.messages else None
 
     @property
+    def latest_real(self) -> Optional[EmailMessage]:
+        """下書き(DRAFT)を除いた最新メッセージ＝会話の実状態。作りかけ下書きで状態を汚さない。"""
+        for m in reversed(self.messages):
+            if "DRAFT" not in m.labels:
+                return m
+        return None
+
+    @property
+    def last_inbound(self) -> Optional[EmailMessage]:
+        """相手から来た最新メッセージ（自分のDRAFT/SENTを除外）＝差出人表示・返信先・本文の基準。"""
+        for m in reversed(self.messages):
+            if "DRAFT" not in m.labels and "SENT" not in m.labels:
+                return m
+        return self.latest_real
+
+    @property
     def latest_is_from_self(self) -> bool:
-        """最新メッセージが本人送信か（Gmailの SENT ラベルで判定＝From文字列に依存しない）。"""
-        m = self.latest
+        """本人が最後に送ったか（下書きは無視・Gmailの SENT ラベルで判定）。"""
+        m = self.latest_real
         return bool(m and "SENT" in m.labels)
 
     @property
     def sender(self) -> str:
-        m = self.latest
+        m = self.last_inbound  # 差出人＝相手（自分の下書き/送信を除外）
         return m.sender if m else ""
 
     @property
     def sender_domain(self) -> str:
-        m = self.latest
+        m = self.last_inbound
         return m.sender_domain if m else ""
 
     @property
     def body(self) -> str:
-        m = self.latest
-        return m.body_text or (m.snippet if m else "") if m else ""
+        m = self.last_inbound
+        return (m.body_text or m.snippet) if m else ""
 
 
 class ClassificationResult(BaseModel):

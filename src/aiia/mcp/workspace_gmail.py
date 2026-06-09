@@ -138,7 +138,7 @@ class WorkspaceGmail:
         """**返信**下書きを作成（宛先=元差出人・件名=Re:・In-Reply-Id 付き＝送信して成立する下書き）。
         戻り値: {draft_id, to, subject}。thread 未指定なら get_thread で取得。"""
         th = thread or self.get_thread(thread_id)
-        m = th.latest
+        m = th.last_inbound  # 返信先＝相手の最新（自分の下書き/送信を除外＝Invalid To header を防ぐ）
         h = {k.lower(): v for k, v in (m.headers if m else {}).items()}
         to = h.get("from", "")  # 返信先＝元の差出人
         subj = th.subject or h.get("subject", "")

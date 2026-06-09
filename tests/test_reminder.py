@@ -120,3 +120,29 @@ def test_snooze_dismiss_undo() -> None:
     assert store.get("u@x", "t1").status == "dismissed" and store.list_active("u@x") == []
     R.undo(store, "u@x", "t1", now)
     assert store.get("u@x", "t1").status == "active"  # 誤解除をundo
+
+
+def test_draft_latest_does_not_pollute_sender_or_unreplied() -> None:
+    # 作りかけ下書き(DRAFT)がスレッド最新でも：差出人=相手・未返信=True（下書きは返信ではない）
+    from aiia.reminder import is_unreplied
+    from aiia.schemas import EmailMessage, EmailThread
+    th = EmailThread(thread_id="t", subject="承認依頼", messages=[
+        EmailMessage(message_id="m1", sender="esmaster@e-timecard.ne.jp", labels=["INBOX"]),
+        EmailMessage(message_id="m2", sender='"小俣翔碁" <s-komata@vectorinc.co.jp>', labels=["DRAFT"]),
+    ])
+    assert th.last_inbound.sender == "esmaster@e-timecard.ne.jp"   # 差出人=相手
+    assert th.sender == "esmaster@e-timecard.ne.jp"                # 表示も相手
+    assert th.latest_is_from_self is False                         # 下書きは送信ではない
+    assert is_unreplied(th) is True                                # 未返信のまま
+
+
+def test_sent_latest_marks_replied_even_with_trailing_draft() -> None:
+    # 返信を送った(SENT)後にさらに下書きがあっても「返信済み」と判定
+    from aiia.reminder import is_unreplied
+    from aiia.schemas import EmailMessage, EmailThread
+    th = EmailThread(thread_id="t", subject="s", messages=[
+        EmailMessage(message_id="m1", sender="client@x.com", labels=["INBOX"]),
+        EmailMessage(message_id="m2", sender="me@vectorinc.co.jp", labels=["SENT"]),
+        EmailMessage(message_id="m3", sender="me@vectorinc.co.jp", labels=["DRAFT"]),
+    ])
+    assert th.latest_is_from_self is True and is_unreplied(th) is False
