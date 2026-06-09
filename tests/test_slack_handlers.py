@@ -12,6 +12,7 @@ from aiia.runtime.slack_handlers import (
     handle_delete,
     handle_edit_submit,
     handle_remind_dismiss,
+    handle_remind_reply,
     handle_remind_snooze,
     handle_remind_undo,
     handle_send_submit,
@@ -123,3 +124,18 @@ def test_remind_snooze_increments() -> None:
     handle_remind_snooze(deps, slack_user_id="U1", thread_id="t1")
     r = rstore.get("alice@x.com", "t1")
     assert r.snooze_count == 1 and r.snooze_until is not None
+
+
+def test_remind_reply_generates_draft_via_factory() -> None:
+    deps, _ = _remind_deps()
+    deps.reply_draft_factory = lambda email, tid: {
+        "draft_id": "d9", "subject": "Re: 見積もりの件", "to": "sato@client.co.jp", "body": "下書き本文です"}
+    out = handle_remind_reply(deps, slack_user_id="U1", thread_id="t1")
+    assert out["draft_id"] == "d9" and out["body"] == "下書き本文です" and "gmail_link" in out
+
+
+def test_remind_reply_fallback_link_without_factory() -> None:
+    deps, _ = _remind_deps()
+    deps.reply_draft_factory = None
+    out = handle_remind_reply(deps, slack_user_id="U1", thread_id="t1")
+    assert out["draft_id"] == "" and out["gmail_link"].endswith("t1")  # 下書き生成不可時はリンク

@@ -26,6 +26,8 @@ class HandlerDeps:
     nonce: Callable[[], str]
     audit: Any = None  # AuditLog | None
     reminder_store: Any = None  # ReminderStore | None（リマインド操作用）
+    # (email, thread_id) → {draft_id, subject, to, body}：返信下書きを生成しGmailに作成。
+    reply_draft_factory: Optional[Callable[[str, str], dict]] = None
 
 
 def _resolve(deps: HandlerDeps, slack_user_id: str) -> tuple[str, OAuthToken]:
@@ -106,8 +108,14 @@ def handle_remind_undo(deps: HandlerDeps, *, slack_user_id: str, thread_id: str)
     return "↩ 取り消しました（リマインドを再開します）。"
 
 
-def handle_remind_reply(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> str:
-    """v1: Gmail へ誘導（返信を検知したら自動解除）。下書き自動生成は後続。"""
-    _remind_email(deps, slack_user_id)  # 連携・権限チェック
-    return (f"✏️ こちらから返信してください: {_reminder.gmail_link(thread_id)}\n"
-            "（返信が検知されると自動で解除されます）")
+def handle_remind_reply(deps: HandlerDeps, *, slack_user_id: str, thread_id: str) -> dict:
+    """『対応する』＝**返信下書きを生成しGmailに作成**して返す（Slackで確認→編集/送信2段へ）。
+    戻り値 {draft_id, subject, to, body, gmail_link}。factory 未設定時は link のみ（後方互換）。"""
+    email = _remind_email(deps, slack_user_id)
+    link = _reminder.gmail_link(thread_id)
+    if deps.reply_draft_factory is None:
+        return {"draft_id": "", "gmail_link": link, "body": "", "subject": "", "to": ""}
+    info = deps.reply_draft_factory(email, thread_id)
+    if deps.audit:
+        deps.audit.record("remind_reply_drafted", thread_id=thread_id, draft_id=info.get("draft_id", ""))
+    return {**info, "gmail_link": link}

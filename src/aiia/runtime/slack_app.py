@@ -23,8 +23,10 @@ from aiia.delivery.slack import (
     ACTION_REMIND_SNOOZE,
     ACTION_REMIND_UNDO,
     ACTION_SEND,
+    _item_actions,
+    _section,
 )
-from aiia.mcp.workspace_gmail import WorkspaceGmailSender
+from aiia.mcp.workspace_gmail import WorkspaceGmail, WorkspaceGmailSender
 from aiia.runtime.slack_handlers import (
     HandlerDeps,
     handle_delete,
@@ -59,6 +61,22 @@ def build_handler_deps(
 
     import time
 
+    def reply_draft_factory(email: str, thread_id: str) -> dict:
+        """『対応する』：本人トークンでスレ取得→Haikuで返信生成→**返信下書きをGmailに作成**。"""
+        from aiia.config import load_platform, load_user
+        from aiia.providers.factory import build_llm
+
+        token = store.get(email)
+        if token is None:
+            raise PermissionError(f"{email} は未連携です（/connect）")
+        gmail = WorkspaceGmail(token)
+        thread = gmail.get_thread(thread_id)
+        llm = build_llm(load_platform())
+        summary = llm.summarize(thread)
+        draft = llm.draft(thread, summary, load_user(email))
+        info = gmail.create_reply_draft(thread_id=thread_id, body=draft.body, thread=thread)
+        return {**info, "body": draft.body}
+
     return HandlerDeps(
         store=store,
         gate=gate or SendConfirmationGate(),
@@ -67,6 +85,7 @@ def build_handler_deps(
         now=time.time,
         nonce=lambda: uuid.uuid4().hex,
         reminder_store=reminder_store,
+        reply_draft_factory=reply_draft_factory,
     )
 
 
@@ -177,25 +196,34 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
 
     # ── 返信リマインド ──────────────────────────────────────────────────────
     @app.action(ACTION_REMIND_REPLY)
-    async def on_remind_reply(ack: Any, body: Any, respond: Any) -> None:
-        await ack()
+    async def on_remind_reply(ack: Any, body: Any, client: Any) -> None:
+        await ack()  # 元のサマリーは消さず、スレッドに下書きを展開（編集/送信2段つき）
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
-        msg = await _run(lambda: handle_remind_reply(deps, slack_user_id=uid, thread_id=tid))
-        await respond(response_type="ephemeral", text=msg)
+        ch = body["channel"]["id"]
+        ts = body["message"].get("ts")
+        info = await _run(lambda: handle_remind_reply(deps, slack_user_id=uid, thread_id=tid))
+        if info.get("draft_id"):
+            preview = (f"✏️ *返信下書きを作成しました*（Gmailの下書きにも保存済）\n"
+                       f"宛先: {info.get('to', '')}\n件名: {info.get('subject', '')}\n\n{info.get('body', '')}")
+            blocks = [_section(preview), _item_actions(info["draft_id"])]
+            await client.chat_postMessage(channel=ch, thread_ts=ts, text="返信下書きを作成しました", blocks=blocks)
+        else:
+            await client.chat_postMessage(channel=ch, thread_ts=ts,
+                text=f"Gmailで返信してください: {info.get('gmail_link', '')}")
 
     @app.action(ACTION_REMIND_SNOOZE)
     async def on_remind_snooze(ack: Any, body: Any, respond: Any) -> None:
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_snooze(deps, slack_user_id=uid, thread_id=tid))
-        await respond(response_type="ephemeral", text=msg)
+        await respond(response_type="ephemeral", replace_original=False, text=msg)
 
     @app.action(ACTION_REMIND_DISMISS)
     async def on_remind_dismiss(ack: Any, body: Any, respond: Any) -> None:
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_dismiss(deps, slack_user_id=uid, thread_id=tid))
-        await respond(response_type="ephemeral", text=msg, blocks=_undo_blocks(tid, msg))
+        await respond(response_type="ephemeral", replace_original=False, text=msg, blocks=_undo_blocks(tid, msg))
 
     @app.action(ACTION_REMIND_MUTE)
     async def on_remind_mute(ack: Any, body: Any, respond: Any) -> None:
@@ -203,14 +231,14 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
         tid = body["actions"][0]["selected_option"]["value"]
         uid = body["user"]["id"]
         msg = await _run(lambda: handle_remind_mute(deps, slack_user_id=uid, thread_id=tid))
-        await respond(response_type="ephemeral", text=msg, blocks=_undo_blocks(tid, msg))
+        await respond(response_type="ephemeral", replace_original=False, text=msg, blocks=_undo_blocks(tid, msg))
 
     @app.action(ACTION_REMIND_UNDO)
     async def on_remind_undo(ack: Any, body: Any, respond: Any) -> None:
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         msg = await _run(lambda: handle_remind_undo(deps, slack_user_id=uid, thread_id=tid))
-        await respond(response_type="ephemeral", text=msg)
+        await respond(response_type="ephemeral", replace_original=False, text=msg)
 
     return app
 

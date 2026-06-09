@@ -19,7 +19,7 @@ from aiia.mcp.workspace_calendar import WorkspaceCalendar
 from aiia.mcp.registry import LABEL_PREFIX
 from aiia.schemas import EmailMessage, EmailThread
 
-_META_HEADERS = ["From", "To", "Cc", "Subject", "Date",
+_META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Message-Id",
                  "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted"]
 
 
@@ -131,6 +131,36 @@ class WorkspaceGmail:
             .execute()
         )
         return str(resp.get("id", ""))
+
+    def create_reply_draft(
+        self, *, thread_id: str, body: str, thread: Optional[EmailThread] = None
+    ) -> dict:
+        """**返信**下書きを作成（宛先=元差出人・件名=Re:・In-Reply-Id 付き＝送信して成立する下書き）。
+        戻り値: {draft_id, to, subject}。thread 未指定なら get_thread で取得。"""
+        th = thread or self.get_thread(thread_id)
+        m = th.latest
+        h = {k.lower(): v for k, v in (m.headers if m else {}).items()}
+        to = h.get("from", "")  # 返信先＝元の差出人
+        subj = th.subject or h.get("subject", "")
+        if not subj.lower().startswith("re:"):
+            subj = f"Re: {subj}"
+        irt = h.get("message-id", "")
+        mime = MIMEText(body, _charset="utf-8")
+        mime["Subject"] = subj
+        if to:
+            mime["To"] = to
+        if irt:
+            mime["In-Reply-To"] = irt
+            mime["References"] = irt
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("ascii")
+        resp = (
+            self._svc()
+            .users()
+            .drafts()
+            .create(userId="me", body={"message": {"threadId": thread_id, "raw": raw}})
+            .execute()
+        )
+        return {"draft_id": str(resp.get("id", "")), "to": to, "subject": subj}
 
     def _label_id(self, label: str) -> str:
         svc = self._svc()
