@@ -269,3 +269,7 @@ def run() -> None:  # pragma: no cover - 常駐起動（live）
         await handler.start_async()
 
     asyncio.run(_main())
+
+
+if __name__ == "__main__":  # pragma: no cover — `python -m aiia.runtime.slack_app` で常駐起動
+    run()
