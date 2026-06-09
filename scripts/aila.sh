@@ -15,12 +15,21 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   check)
     miss=0
-    for k in AWS_REGION AIIA_DDB_TABLE OAUTH_KMS_KEY_ID OAUTH_STATE_SECRET \
-             CONNECT_GOOGLE_CLIENT_ID CONNECT_GOOGLE_CLIENT_SECRET SLACK_BOT_TOKEN SLACK_APP_TOKEN; do
-      v="${!k:-}"
-      if [ -z "$v" ] || [[ "$v" == FILL_ME* ]]; then echo "  ✗ $k 未設定/FILL_ME"; miss=1; else echo "  ✓ $k"; fi
-    done
-    [ "$miss" = 0 ] && echo "✅ env OK" || { echo "⚠ 未設定あり（.env.aila を編集）"; exit 1; }
+    chk() {  # $1=name $2=value $3=正規表現(任意・形式検査)
+      local k="$1" v="$2" re="${3:-}"
+      if [ -z "$v" ] || [[ "$v" == FILL_ME* ]]; then echo "  ✗ $k 未設定/FILL_ME"; miss=1; return; fi
+      if [ -n "$re" ] && ! [[ "$v" =~ $re ]]; then echo "  ✗ $k 形式不正（プレースホルダのまま？本物の値に直す）"; miss=1; return; fi
+      echo "  ✓ $k"
+    }
+    chk AWS_REGION "${AWS_REGION:-}"
+    chk AIIA_DDB_TABLE "${AIIA_DDB_TABLE:-}"
+    chk OAUTH_KMS_KEY_ID "${OAUTH_KMS_KEY_ID:-}" '^arn:aws:kms:'
+    chk OAUTH_STATE_SECRET "${OAUTH_STATE_SECRET:-}" '^[0-9a-f]{32,}$'
+    chk CONNECT_GOOGLE_CLIENT_ID "${CONNECT_GOOGLE_CLIENT_ID:-}" 'apps\.googleusercontent\.com$'
+    chk CONNECT_GOOGLE_CLIENT_SECRET "${CONNECT_GOOGLE_CLIENT_SECRET:-}" '^GOCSPX-[A-Za-z0-9_-]+$'
+    chk SLACK_BOT_TOKEN "${SLACK_BOT_TOKEN:-}" '^xoxb-[A-Za-z0-9-]+$'
+    chk SLACK_APP_TOKEN "${SLACK_APP_TOKEN:-}" '^xapp-[A-Za-z0-9-]+$'
+    [ "$miss" = 0 ] && echo "✅ env OK（形式も検査済）" || { echo "⚠ 未設定/形式不正あり（.env.aila を編集）"; exit 1; }
     ;;
   smoke)
     $PY -c "import os;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
