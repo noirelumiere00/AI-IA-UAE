@@ -22,19 +22,13 @@ Gmail scope＝`gmail.modify` 一本（送信は drafts.send・2段確認ゲー�
 5. ワークスペースにインストール → Bot Token `SLACK_BOT_TOKEN`(xoxb-)。
 6. Interactivity を ON（ボタン/モーダル）。
 
-## 2. AWS（ap-northeast-1・最小）
-```bash
-export AWS_REGION=ap-northeast-1
-# DynamoDB: per-user トークン（PK=user_email）
-aws dynamodb create-table --table-name aiia-oauth-tokens \
-  --attribute-definitions AttributeName=user_email,AttributeType=S \
-  --key-schema AttributeName=user_email,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST --region ap-northeast-1
-# （任意）文体キャッシュ。当面は run 内メモリで足りるので後回し可
-# KMS は既存 teamagent-oauth-tokens 鍵を流用（最小化）。鍵ARNを控える:
-aws kms describe-key --key-id alias/teamagent-oauth-tokens --region ap-northeast-1 \
-  --query KeyMetadata.Arn --output text   # → OAUTH_KMS_KEY_ID に使う
-```
+## 2. AWS（ap-northeast-1・最小）— ✅ **実施済（Claudeが作成・実機検証済）**
+- DynamoDB `aiia-oauth-tokens`（PK=user_email・従量課金）＝**作成済(ACTIVE)**。
+- KMS は既存 `alias/teamagent-oauth-tokens` を流用。**鍵ARN**＝
+  `arn:aws:kms:ap-northeast-1:718959508629:key/7e41bedb-6980-4a67-a0bc-e1307d798fb4`
+- 実DynamoDB＋実KMSで token 往復・平文非保存を疎通確認済。
+- **Bedrock も ap-northeast-1(jp.) で実Claude動作確認済**（haiku/sonnet/opus・us-east-1フォールバック不要・env上書き不要）。
+- （任意）文体キャッシュ用テーブルは当面 run 内メモリで足りるので後回し可。
 
 ## 3. GCP（pgd1 に redirect_uri 追加）
 1. GCP Console → API とサービス → 認証情報 → **pgd1...（web型 連携用）** を開く。
@@ -46,8 +40,8 @@ aws kms describe-key --key-id alias/teamagent-oauth-tokens --region ap-northeast
 ```bash
 export AWS_REGION=ap-northeast-1
 export AIIA_DDB_TABLE=aiia-oauth-tokens
-export OAUTH_KMS_KEY_ID=arn:aws:kms:ap-northeast-1:718959508629:key/...   # 手順2の鍵
-export AIIA_PROFILE=bedrock
+export OAUTH_KMS_KEY_ID=arn:aws:kms:ap-northeast-1:718959508629:key/7e41bedb-6980-4a67-a0bc-e1307d798fb4
+export AIIA_PROFILE=bedrock   # ap-northeast-1=jp.プロファイル自動解決(検証済・上書き不要)
 # Google（pgd1 流用）
 export CONNECT_GOOGLE_CLIENT_ID=676659122211-pgd1mj4et6sf7uqqmsni2b3kmbbd8qeg.apps.googleusercontent.com
 export CONNECT_GOOGLE_CLIENT_SECRET=...   # Secrets Manager teamagent/dev/connect_google_secret
@@ -56,7 +50,7 @@ export OAUTH_REDIRECT_URI=https://connect.aila.example/oauth2/callback
 # Slack（AiLa）
 export SLACK_BOT_TOKEN=xoxb-...
 export SLACK_APP_TOKEN=xapp-...
-# Bedrock（ap-northeast-1 で Claude 未許可なら us-east-1 に変え、AIIA_BEDROCK_MODEL_* で上書き）
+# Bedrock は AWS_REGION=ap-northeast-1 で jp.プロファイルに自動解決（検証済）。上書き不要。
 ```
 
 ## 5. トークン移行（RDS → DynamoDB・全員再連携不要）
