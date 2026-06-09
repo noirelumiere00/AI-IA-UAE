@@ -17,9 +17,19 @@ from typing import Any, Optional
 
 from aiia.auth.token_store import OAuthToken
 
+# Workspace 全部入り（将来機能の再同意を回避・Internalなのでgoogle審査不要）。
+# 実際の操作はコード側で限定（誤送信ゼロ等）。gmailは modify 止まり（恒久削除のmail全権は付けない）。
 WORKSPACE_SCOPES: tuple[str, ...] = (
-    "https://www.googleapis.com/auth/gmail.modify",  # 読取+下書き(作成/更新/削除)+送信(drafts.send)+ラベル
-    "https://www.googleapis.com/auth/calendar.readonly",
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.modify",        # 読取+下書き+送信(drafts.send)+ラベル
+    "https://www.googleapis.com/auth/calendar",            # 予定 読取+作成/更新
+    "https://www.googleapis.com/auth/drive",               # Drive 読取+書込
+    "https://www.googleapis.com/auth/documents",           # Docs
+    "https://www.googleapis.com/auth/spreadsheets",        # Sheets（VSEO等）
+    "https://www.googleapis.com/auth/presentations",       # Slides
+    "https://www.googleapis.com/auth/contacts",            # People/連絡先
 )
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"

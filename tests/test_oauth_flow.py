@@ -24,11 +24,12 @@ def test_state_tamper_rejected() -> None:
     assert of.verify_state("not-base64!!", secret=_SECRET) is None
 
 
-def test_scopes_are_modify_and_calendar() -> None:
+def test_scopes_workspace_inclusive() -> None:
     joined = " ".join(of.WORKSPACE_SCOPES)
-    assert "gmail.modify" in joined  # 読取+下書き+送信(drafts.send)+ラベルを1本でカバー(TeamAgent同じ)
-    assert "calendar.readonly" in joined
-    assert "gmail.compose" not in joined and "gmail.send" not in joined  # modify一本化
+    for s in ("gmail.modify", "/auth/calendar", "/auth/drive", "documents",
+              "spreadsheets", "presentations", "contacts", "userinfo.email"):
+        assert s in joined, s
+    assert "https://mail.google.com/" not in joined  # mail全権(恒久削除)は付けない
 
 
 def test_connect_client_prefers_connect_then_google(monkeypatch: pytest.MonkeyPatch) -> None:
