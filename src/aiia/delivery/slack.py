@@ -49,7 +49,7 @@ def _item_actions(value: str) -> dict:
 
 
 def _date_label(d: Digest) -> str:
-    g = d.generated_at
+    g = d.generated_at.astimezone(_JST)  # JST 表示（generated_at は UTC のことがある）
     return f"{g.month}/{g.day} {g:%H:%M}"
 
 
