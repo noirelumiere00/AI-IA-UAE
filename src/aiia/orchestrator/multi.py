@@ -17,6 +17,7 @@ from aiia.config import load_agent_config, load_platform, load_user
 from aiia.delivery import render_digest_text, render_slack_blocks
 from aiia.mcp.workspace_gmail import WorkspaceGmailToolset
 from aiia.pipeline import PipelineDeps, run
+from aiia.profile.providers import build_grounding_provider, build_style_provider
 from aiia.providers import build_llm
 from aiia.safety.audit import AuditLog
 
@@ -40,10 +41,14 @@ def run_for_all_users(
     dry_run: bool = False,
     max_workers: int = 4,
     gmail_service_factory: Optional[Callable[[str], Any]] = None,  # テスト用に Gmail service 注入
+    channel_map: Optional[dict[str, str]] = None,  # client名→Slack channel_id（grounding）
+    max_budget_usd: Optional[float] = None,  # per-user/日 のコスト上限
+    personalize: bool = True,  # M3: 文体/grounding を有効化（LLMがsummarize_text対応かつslackありの時）
 ) -> list[UserResult]:
     platform = platform or load_platform(config_dir)
     agent = load_agent_config("morning_email", config_dir)
     emails = store.list_emails()
+    style_cache: dict[str, str] = {}  # run 内で per-user 文体を1回だけ構築
 
     def _one(email: str) -> UserResult:
         try:
@@ -54,10 +59,26 @@ def run_for_all_users(
             service = gmail_service_factory(email) if gmail_service_factory else None
             tools = WorkspaceGmailToolset.from_token(token, service=service)
             llm = build_llm(platform)
+
+            # M3: 文体/grounding provider（LLMが要約対応かつslackありの時のみ）
+            style_provider = None
+            grounding_provider = None
+            if personalize and slack is not None:
+                summarize = getattr(llm, "summarize_text", None)
+                if summarize is not None:
+                    suid = slack.user_id_for_email(email) if hasattr(slack, "user_id_for_email") else None
+                    style_provider = build_style_provider(
+                        gmail=tools.gmail, summarize=summarize, slack=slack, slack_user_id=suid,
+                        cache=style_cache,
+                    )
+                grounding_provider = build_grounding_provider(slack=slack, channel_map=channel_map or {})
+
             res = run(
                 PipelineDeps(
                     llm=llm, tools=tools, user=ucfg, agent=agent,
                     audit=AuditLog(email), dry_run=dry_run,
+                    style_provider=style_provider, grounding_provider=grounding_provider,
+                    max_budget_usd=max_budget_usd,
                 )
             )
             delivered = False
