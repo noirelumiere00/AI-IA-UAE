@@ -1,0 +1,7 @@
+# AiLa connect-web を自動HTTPSで公開（Let's Encrypt 自動取得）。
+# <DOMAIN> をあなたのドメインに置換（例 connect-aila.vectorinc.co.jp）。DNS A/AAAA をこのサーバーへ。
+# 公開するのは /oauth2/callback（Google OAuth）と /reply（[対応する]リダイレクト）と /healthz。
+<DOMAIN> {
+	encode gzip
+	reverse_proxy 127.0.0.1:8788
+}

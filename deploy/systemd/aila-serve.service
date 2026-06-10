@@ -1,0 +1,16 @@
+[Unit]
+Description=AiLa serve (Slack Socket Mode - reminder buttons: 対応する/対応済み/後で)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aila
+# Socket Mode = Slackへのアウトバウンド接続。inbound公開IP不要。24/7常駐。
+ExecStart=/opt/aila/scripts/aila.sh serve
+Restart=always
+RestartSec=3
+User=aila
+
+[Install]
+WantedBy=multi-user.target

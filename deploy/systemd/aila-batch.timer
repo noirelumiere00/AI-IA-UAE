@@ -1,0 +1,11 @@
+[Unit]
+Description=AiLa morning batch 平日 9:30 JST
+
+[Timer]
+# JST 9:30 = UTC 0:30。OnCalendar は UTC（Persistent=true で停止中も次回起動時に補完）。
+# 平日のみ（月-金）。
+OnCalendar=Mon..Fri *-*-* 00:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=AiLa morning batch (connected全員へ朝のメールサマリーをSlack DM配信)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aila
+ExecStart=/opt/aila/scripts/aila.sh batch
+User=aila

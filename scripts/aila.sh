@@ -14,6 +14,12 @@ cd "$(dirname "$0")/.."
 PY=".venv/bin/python"
 cmd="${1:-help}"; shift || true
 
+# .env.aila の値を行単位で安全に書き換え（Mac=BSD sed / Linux=GNU sed 両対応・perm維持）。
+_set_env() {  # $1=KEY $2=VALUE
+  local key="$1" val="$2" tmp; tmp="$(mktemp)"
+  sed "s|^export ${key}=.*|export ${key}=${val}|" .env.aila > "$tmp" && cat "$tmp" > .env.aila && rm -f "$tmp"
+}
+
 case "$cmd" in
   check)
     miss=0
@@ -31,14 +37,16 @@ case "$cmd" in
     chk CONNECT_GOOGLE_CLIENT_SECRET "${CONNECT_GOOGLE_CLIENT_SECRET:-}" '^GOCSPX-[A-Za-z0-9_-]+$'
     chk SLACK_BOT_TOKEN "${SLACK_BOT_TOKEN:-}" '^xoxb-[A-Za-z0-9-]+$'
     chk SLACK_APP_TOKEN "${SLACK_APP_TOKEN:-}" '^xapp-[A-Za-z0-9-]+$'
+    chk OAUTH_REDIRECT_URI "${OAUTH_REDIRECT_URI:-}" '^https?://'                 # connect-web の callback URL
+    chk CONNECT_BASE_URL "${CONNECT_BASE_URL:-http://localhost:8788}" '^https?://'  # /reply ボタンの基底URL
     [ "$miss" = 0 ] && echo "✅ env OK（形式も検査済）" || { echo "⚠ 未設定/形式不正あり（.env.aila を編集）"; exit 1; }
     ;;
   set-slack)  # ./scripts/aila.sh set-slack <xoxb-...> <xapp-...>  ※引数で渡す＝ペースト安全
     bot="${1:-}"; app="${2:-}"
     [[ "$bot" =~ ^xoxb-[A-Za-z0-9-]+$ ]] || { echo "✗ 第1引数が xoxb- 形式でない（本物のBot Tokenを渡す）"; exit 1; }
     [[ "$app" =~ ^xapp-[A-Za-z0-9-]+$ ]] || { echo "✗ 第2引数が xapp- 形式でない（本物のApp Tokenを渡す）"; exit 1; }
-    sed -i '' "s|^export SLACK_BOT_TOKEN=.*|export SLACK_BOT_TOKEN=$bot|" .env.aila
-    sed -i '' "s|^export SLACK_APP_TOKEN=.*|export SLACK_APP_TOKEN=$app|" .env.aila
+    _set_env SLACK_BOT_TOKEN "$bot"
+    _set_env SLACK_APP_TOKEN "$app"
     echo "✅ Slackトークンを .env.aila に設定（形式検査OK）"
     exec "$0" check
     ;;
@@ -63,11 +71,12 @@ rstore=DynamoDbReminderStore(os.environ.get('AIIA_REMINDER_TABLE','aiia-reminder
   connect-link)
     $PY -m aiia.scripts.make_connect_links "$@"
     ;;
-  connect-web)  # OAuthコールバック受け（localhost:8788）。/connect や connect-link のリンク先
+  connect-web)  # OAuthコールバック＋/reply 受け。host/port は env で（本番は 0.0.0.0＋リバプロ背後）
     $PY -c "import os,uvicorn;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
 from aiia.connect_web.app import create_app;\
 store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID']));\
-uvicorn.run(create_app(redirect_uri=os.environ['OAUTH_REDIRECT_URI'], store=store), host='127.0.0.1', port=8788)"
+uvicorn.run(create_app(redirect_uri=os.environ['OAUTH_REDIRECT_URI'], store=store),\
+ host=os.environ.get('CONNECT_HOST','127.0.0.1'), port=int(os.environ.get('CONNECT_PORT','8788')))"
     ;;
   *)
     sed -n '2,10p' "$0"

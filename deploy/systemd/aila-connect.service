@@ -1,0 +1,16 @@
+[Unit]
+Description=AiLa connect-web (OAuth callback + /reply redirect)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aila
+# aila.sh が .env.aila(export形式) を source する。本番は CONNECT_HOST=127.0.0.1 のまま Caddy 背後に置く。
+ExecStart=/opt/aila/scripts/aila.sh connect-web
+Restart=always
+RestartSec=3
+User=aila
+
+[Install]
+WantedBy=multi-user.target
