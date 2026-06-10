@@ -5,13 +5,16 @@
 - pipeline はユーザー間で状態共有ゼロ＝安全に並列（max_workers で総量規制）。
 - per-user 監査。配信は dry_run=False かつ slack 指定時のみ（既定は実行＝下書き作成＋DM配信）。
 """
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from aiia.adapters.slack_user_client import SlackUserClient
 from aiia.auth.token_store import TokenStore
 from aiia.config import load_agent_config, load_platform, load_user
 from aiia.delivery import render_digest_text, render_slack_blocks
@@ -19,6 +22,7 @@ from aiia.mcp.workspace_gmail import WorkspaceGmailToolset
 from aiia.pipeline import PipelineDeps, run
 from aiia.profile.providers import build_grounding_provider, build_style_provider
 from aiia.providers import build_llm
+from aiia.reminder import compute_slack_reminders
 from aiia.safety.audit import AuditLog
 
 
@@ -45,6 +49,12 @@ def run_for_all_users(
     max_budget_usd: Optional[float] = None,  # per-user/日 のコスト上限
     personalize: bool = True,  # M3: 文体/grounding を有効化（LLMがsummarize_text対応かつslackありの時）
     reminder_store: Any = None,  # Phase2: 返信リマインド state（指定時のみ計算）
+    slack_token_store: Optional[
+        TokenStore
+    ] = None,  # Phase3: Slackユーザー認可(xoxp)。認可者のみメンション検知
+    slack_user_factory: Optional[
+        Callable[[str], Any]
+    ] = None,  # テスト用に SlackUserClient(xoxp) を注入
 ) -> list[UserResult]:
     platform = platform or load_platform(config_dir)
     agent = load_agent_config("morning_email", config_dir)
@@ -58,8 +68,10 @@ def run_for_all_users(
                 return UserResult(email, ok=False, error="token_missing")
             ucfg = load_user(email, config_dir)  # config/users/<email>.yaml or 既定(user_id=email)
             # display_name を Slack 実名で補完（本人名指し昇格に使用）。best-effort・失敗時は既定のまま。
-            if slack is not None and hasattr(slack, "display_name_for_email") and (
-                not ucfg.display_name or ucfg.display_name == "（ユーザー名）"
+            if (
+                slack is not None
+                and hasattr(slack, "display_name_for_email")
+                and (not ucfg.display_name or ucfg.display_name == "（ユーザー名）")
             ):
                 try:
                     dn = slack.display_name_for_email(email)
@@ -77,21 +89,57 @@ def run_for_all_users(
             if personalize and slack is not None:
                 summarize = getattr(llm, "summarize_text", None)
                 if summarize is not None:
-                    suid = slack.user_id_for_email(email) if hasattr(slack, "user_id_for_email") else None
+                    suid = (
+                        slack.user_id_for_email(email)
+                        if hasattr(slack, "user_id_for_email")
+                        else None
+                    )
                     style_provider = build_style_provider(
-                        gmail=tools.gmail, summarize=summarize, slack=slack, slack_user_id=suid,
+                        gmail=tools.gmail,
+                        summarize=summarize,
+                        slack=slack,
+                        slack_user_id=suid,
                         cache=style_cache,
                     )
-                grounding_provider = build_grounding_provider(slack=slack, channel_map=channel_map or {})
+                grounding_provider = build_grounding_provider(
+                    slack=slack, channel_map=channel_map or {}
+                )
 
             res = run(
                 PipelineDeps(
-                    llm=llm, tools=tools, user=ucfg, agent=agent,
-                    audit=AuditLog(email), dry_run=dry_run,
-                    style_provider=style_provider, grounding_provider=grounding_provider,
-                    max_budget_usd=max_budget_usd, reminder_store=reminder_store,
+                    llm=llm,
+                    tools=tools,
+                    user=ucfg,
+                    agent=agent,
+                    audit=AuditLog(email),
+                    dry_run=dry_run,
+                    style_provider=style_provider,
+                    grounding_provider=grounding_provider,
+                    max_budget_usd=max_budget_usd,
+                    reminder_store=reminder_store,
                 )
             )
+            # Phase3: Slack未返信メンション。認可(xoxp)済みの人だけ・fail-safe（失敗してもメールは配る）。
+            if slack_token_store is not None and reminder_store is not None and slack is not None:
+                try:
+                    sx = slack_token_store.get(email)
+                    suid = slack.user_id_for_email(email) if sx is not None else None
+                    if sx is not None and suid:
+                        su = (slack_user_factory or (lambda tok: SlackUserClient(token=tok)))(
+                            sx.refresh_token
+                        )
+                        res.digest.reminders.extend(
+                            compute_slack_reminders(
+                                reminder_store,
+                                su,
+                                email,
+                                suid,
+                                datetime.now(timezone.utc),
+                                write=not dry_run,
+                            )
+                        )
+                except Exception:  # noqa: BLE001 — Slack分の失敗でメールダイジェストは止めない
+                    pass
             delivered = False
             if slack is not None and not dry_run:
                 delivered = slack.send_digest(
@@ -100,8 +148,11 @@ def run_for_all_users(
                     text=render_digest_text(res.digest),
                 )
             return UserResult(
-                email, ok=True, processed=res.digest.processed,
-                drafts_created=res.drafts_created, delivered=delivered,
+                email,
+                ok=True,
+                processed=res.digest.processed,
+                drafts_created=res.drafts_created,
+                delivered=delivered,
             )
         except Exception as exc:  # 1人の失敗は隔離（他ユーザーは継続）
             return UserResult(email, ok=False, error=type(exc).__name__)

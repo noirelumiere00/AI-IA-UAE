@@ -1,4 +1,5 @@
 """型契約（pydantic）。I/O・SDK import 無し → pipelineの純粋性とテスト容易性を担保。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -160,7 +161,9 @@ class DigestItem(BaseModel):
     classification: ClassificationResult
     draft: Optional[DraftReply] = None
     gmail_link: Optional[str] = None
-    gmail_draft_id: Optional[str] = None  # 非dry_runで作成したGmail下書きID（M2ボタンが編集/削除/送信に使う）
+    gmail_draft_id: Optional[str] = (
+        None  # 非dry_runで作成したGmail下書きID（M2ボタンが編集/削除/送信に使う）
+    )
     needs_review: bool = False
 
 
@@ -173,8 +176,8 @@ class CalendarEvent(BaseModel):
     # accepted / tentative / needsAction / declined（declined は表示前に除外）
     response_status: str = "accepted"
     conference_url: Optional[str] = None  # Meet/Zoom 等の参加URL
-    location: Optional[str] = None         # 会議室/場所
-    description: Optional[str] = None       # 説明（redaction対象・URL/会議室がここに入ることも）
+    location: Optional[str] = None  # 会議室/場所
+    description: Optional[str] = None  # 説明（redaction対象・URL/会議室がここに入ることも）
 
 
 class ReminderView(BaseModel):
@@ -182,11 +185,18 @@ class ReminderView(BaseModel):
     category: Category
     subject: str = ""
     sender: str = ""
-    snippet: str = ""           # 軽い手がかり（本文要約は「対応する」押下時にon-demand）
-    business_days: int = 0      # 未返信の営業日数
+    snippet: str = ""  # 軽い手がかり（本文要約は「対応する」押下時にon-demand）
+    business_days: int = 0  # 未返信の営業日数
     first_seen: Optional[datetime] = None
     gmail_link: Optional[str] = None
-    reply_url: Optional[str] = None  # [対応する]url-button用（/reply?s=署名）。未設定なら従来のaction-button。
+    reply_url: Optional[str] = (
+        None  # [対応する]url-button用（/reply?s=署名）。未設定なら従来のaction-button。
+    )
+    # source="slack" のときだけ設定（既定は email で従来挙動不変）。
+    source: str = "email"  # email | slack
+    permalink: Optional[str] = None  # Slackメッセージのpermalink（[対応する]はここへ飛ぶ）
+    channel_id: Optional[str] = None
+    message_ts: Optional[str] = None
 
 
 class Digest(BaseModel):

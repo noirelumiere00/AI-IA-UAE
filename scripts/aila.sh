@@ -43,6 +43,13 @@ case "$cmd" in
     chk SLACK_APP_TOKEN "${SLACK_APP_TOKEN:-}" '^xapp-[A-Za-z0-9-]+$'
     chk OAUTH_REDIRECT_URI "${OAUTH_REDIRECT_URI:-}" '^https?://'                 # connect-web の callback URL
     chk CONNECT_BASE_URL "${CONNECT_BASE_URL:-http://localhost:8788}" '^https?://'  # /reply ボタンの基底URL
+    # Slack未返信メンション連携（任意）。SLACK_CLIENT_ID を入れた時だけ一式を検査する＝段階導入可。
+    if [ -n "${SLACK_CLIENT_ID:-}" ]; then
+      chk SLACK_CLIENT_ID "${SLACK_CLIENT_ID:-}" '^[0-9]+\.[0-9]+$'
+      chk SLACK_CLIENT_SECRET "${SLACK_CLIENT_SECRET:-}"
+      chk SLACK_OAUTH_REDIRECT_URI "${SLACK_OAUTH_REDIRECT_URI:-}" '^https?://'
+      chk AIIA_SLACK_TOKEN_TABLE "${AIIA_SLACK_TOKEN_TABLE:-}"
+    fi
     [ "$miss" = 0 ] && echo "✅ env OK（形式も検査済）" || { echo "⚠ 未設定/形式不正あり（.env.aila を編集）"; exit 1; }
     ;;
   set-slack)  # ./scripts/aila.sh set-slack <xoxb-...> <xapp-...>  ※引数で渡す＝ペースト安全
@@ -61,13 +68,8 @@ print('連携済み:', DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher
   migrate)
     $PY -m aiia.scripts.migrate_tokens "$@"
     ;;
-  batch)
-    $PY -c "import os;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
-from aiia.adapters.slack_client import SlackDelivery;from aiia.orchestrator.multi import run_for_all_users;\
-from aiia.state.reminder_store import DynamoDbReminderStore;\
-store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID']));\
-rstore=DynamoDbReminderStore(os.environ.get('AIIA_REMINDER_TABLE','aiia-reminder-state'));\
-[print(r) for r in run_for_all_users(store=store, slack=SlackDelivery(), dry_run=False, max_budget_usd=1.0, reminder_store=rstore)]"
+  batch)  # 連携済み全員へ朝ダイジェスト配信（Slack認可者は未返信メンションも合流）
+    $PY -m aiia.orchestrator.run_batch
     ;;
   serve)
     $PY -m aiia.runtime.slack_app
@@ -75,21 +77,20 @@ rstore=DynamoDbReminderStore(os.environ.get('AIIA_REMINDER_TABLE','aiia-reminder
   connect-link)
     $PY -m aiia.scripts.make_connect_links "$@"
     ;;
-  connect-url)  # 共通1リンク（Slackに貼って全員タップ連携・本人はGoogleログインで確定）
+  connect-url)  # Google共通1リンク（Slackに貼って全員タップ連携・本人はGoogleログインで確定）
     $PY -m aiia.scripts.make_connect_links --universal
     ;;
-  connect-web)  # OAuthコールバック＋/reply 受け。host/port は env で（本番は 0.0.0.0＋リバプロ背後）
-    $PY -c "import os,uvicorn;from aiia.auth.token_store import DynamoDbTokenStore,KmsCipher;\
-from aiia.connect_web.app import create_app;\
-store=DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher(os.environ['OAUTH_KMS_KEY_ID']));\
-uvicorn.run(create_app(redirect_uri=os.environ['OAUTH_REDIRECT_URI'], store=store),\
- host=os.environ.get('CONNECT_HOST','127.0.0.1'), port=int(os.environ.get('CONNECT_PORT','8788')))"
+  connect-url-slack)  # Slack共通1リンク（未返信メンションリマインド用・全員タップで自分のSlackを認可）
+    $PY -m aiia.scripts.make_connect_links --universal-slack
+    ;;
+  connect-web)  # OAuthコールバック＋/reply（＋SLACK_CLIENT_ID設定時は /oauth2/slack/callback）。本番は0.0.0.0＋リバプロ背後
+    $PY -m aiia.connect_web.serve
     ;;
   up)  # 再起動後の一発復旧: keepalive(スリープ抑止)+connect-web+serve+tunnel を冪等起動（既存は触らない）
     mkdir -p /tmp/aila
     _is_up() { pgrep -f "$1" >/dev/null 2>&1; }
     if _is_up 'caffeinate -dimsu'; then echo "  ✓ keepalive 稼働中"; else nohup caffeinate -dimsu >/tmp/aila/caffeinate.log 2>&1 & echo "  ▶ keepalive(caffeinate) 起動＝Mac非スリープ"; fi
-    if _is_up 'aiia.connect_web.app'; then echo "  ✓ connect-web 稼働中"; else nohup "$0" connect-web >/tmp/aila/connect.log 2>&1 & echo "  ▶ connect-web 起動"; fi
+    if _is_up 'aiia.connect_web.serve'; then echo "  ✓ connect-web 稼働中"; else nohup "$0" connect-web >/tmp/aila/connect.log 2>&1 & echo "  ▶ connect-web 起動"; fi
     if _is_up 'aiia.runtime.slack_app'; then echo "  ✓ serve 稼働中"; else nohup "$0" serve >/tmp/aila/serve.log 2>&1 & echo "  ▶ serve 起動"; fi
     if _is_up 'cloudflared tunnel --url http://localhost:8788'; then echo "  ✓ tunnel 稼働中"; else nohup cloudflared tunnel --url http://localhost:8788 --protocol http2 >/tmp/aila/tunnel.log 2>&1 & echo "  ▶ tunnel 起動(http2)"; fi
     sleep 4
@@ -98,14 +99,14 @@ uvicorn.run(create_app(redirect_uri=os.environ['OAUTH_REDIRECT_URI'], store=stor
     exec "$0" status
     ;;
   down)  # AiLa関連を停止（keepalive含む）。SSMトンネル/Chrome等には触れない。
-    for pat in 'cloudflared tunnel --url http://localhost:8788' 'aiia.runtime.slack_app' 'aiia.connect_web.app' 'caffeinate -dimsu'; do
+    for pat in 'cloudflared tunnel --url http://localhost:8788' 'aiia.runtime.slack_app' 'aiia.connect_web.serve' 'caffeinate -dimsu'; do
       pkill -f "$pat" 2>/dev/null && echo "  ■ stopped: $pat" || true
     done
     ;;
   status)  # 稼働状況の一覧（プロセス＋healthz）
     echo "AiLa status:"
     pgrep -f 'caffeinate -dimsu'   >/dev/null && echo "  ✓ keepalive(非スリープ)" || echo "  ✗ keepalive なし（スリープでサービス停止の恐れ）"
-    pgrep -f 'aiia.connect_web.app'>/dev/null && echo "  ✓ connect-web"            || echo "  ✗ connect-web"
+    pgrep -f 'aiia.connect_web.serve'>/dev/null && echo "  ✓ connect-web"            || echo "  ✗ connect-web"
     pgrep -f 'aiia.runtime.slack_app'>/dev/null && echo "  ✓ serve(Slackボタン応答)"|| echo "  ✗ serve"
     pgrep -f 'cloudflared tunnel'  >/dev/null && echo "  ✓ tunnel"                  || echo "  ✗ tunnel"
     curl -sf http://localhost:8788/healthz >/dev/null 2>&1 && echo "  ✓ healthz(localhost:8788)" || echo "  ✗ healthz"

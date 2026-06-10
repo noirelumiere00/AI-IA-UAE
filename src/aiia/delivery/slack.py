@@ -5,6 +5,7 @@
 優先度は装飾絵文字でなく〔カテゴリ語〕＋並び順で表現。Gmailリンクは送信者/件名に統合。
 ステータスの✅リアクション（別レイヤー）は温存。
 """
+
 from __future__ import annotations
 
 import re
@@ -15,16 +16,20 @@ from aiia.schemas import Category, Digest, DigestItem
 
 # カテゴリの短い日本語ラベル（色絵文字だけだと意味不明なので併記して戻す）
 _CAT_LABEL = {
-    Category.CLIENT_URGENT: "顧客・緊急", Category.CLIENT_NORMAL: "顧客",
-    Category.PRESS_MEDIA: "プレス", Category.FINANCE_LEGAL: "金額・法務",
-    Category.VENDOR_PARTNER: "取引先", Category.INTERNAL: "社内", Category.NEWSLETTER: "一般",
+    Category.CLIENT_URGENT: "顧客・緊急",
+    Category.CLIENT_NORMAL: "顧客",
+    Category.PRESS_MEDIA: "プレス",
+    Category.FINANCE_LEGAL: "金額・法務",
+    Category.VENDOR_PARTNER: "取引先",
+    Category.INTERNAL: "社内",
+    Category.NEWSLETTER: "一般",
 }
 
 _MAX_BLOCKS = 49
 _MAX_TEXT = 2900
 _JST = timezone(timedelta(hours=9))
-_CAL_LIST_MAX = 5    # 下部フル予定の時刻列挙上限
-_TO_TOP = 5          # 要対応の個別表示上限（超過は「ほかN件」fold）
+_CAL_LIST_MAX = 5  # 下部フル予定の時刻列挙上限
+_TO_TOP = 5  # 要対応の個別表示上限（超過は「ほかN件」fold）
 _WD = ["月", "火", "水", "木", "金", "土", "日"]
 
 # 対話ボタン（M2 の block_actions ハンドラが束縛）。value には thread_id / draft_id。
@@ -44,8 +49,12 @@ _REMIND_BLOCK_PREFIX = "aiia_remind_"
 def _reminder_actions(thread_id: str, reply_url: Optional[str] = None) -> dict:
     # 対応する：reply_url ありは url-button（1クリックで /reply→下書き作成→Gmailへ自動リダイレクト）、
     # 無しは従来の action-button（押す→下書き作成→リンク）。
-    reply_btn: dict = {"type": "button", "action_id": ACTION_REMIND_REPLY, "style": "primary",
-                       "text": {"type": "plain_text", "text": "対応する"}}
+    reply_btn: dict = {
+        "type": "button",
+        "action_id": ACTION_REMIND_REPLY,
+        "style": "primary",
+        "text": {"type": "plain_text", "text": "対応する"},
+    }
     if reply_url:
         reply_btn["url"] = reply_url
     else:
@@ -55,12 +64,25 @@ def _reminder_actions(thread_id: str, reply_url: Optional[str] = None) -> dict:
         "block_id": f"{_REMIND_BLOCK_PREFIX}{thread_id}",
         "elements": [
             reply_btn,
-            {"type": "button", "action_id": ACTION_REMIND_DISMISS,
-             "text": {"type": "plain_text", "text": "対応済み"}, "value": thread_id},
-            {"type": "button", "action_id": ACTION_REMIND_SNOOZE,
-             "text": {"type": "plain_text", "text": "後で"}, "value": thread_id},
-            {"type": "overflow", "action_id": ACTION_REMIND_MUTE,
-             "options": [{"text": {"type": "plain_text", "text": "もう通知しない"}, "value": thread_id}]},
+            {
+                "type": "button",
+                "action_id": ACTION_REMIND_DISMISS,
+                "text": {"type": "plain_text", "text": "対応済み"},
+                "value": thread_id,
+            },
+            {
+                "type": "button",
+                "action_id": ACTION_REMIND_SNOOZE,
+                "text": {"type": "plain_text", "text": "後で"},
+                "value": thread_id,
+            },
+            {
+                "type": "overflow",
+                "action_id": ACTION_REMIND_MUTE,
+                "options": [
+                    {"text": {"type": "plain_text", "text": "もう通知しない"}, "value": thread_id}
+                ],
+            },
         ],
     }
 
@@ -70,18 +92,34 @@ def _item_actions(value: str) -> dict:
         "type": "actions",
         "block_id": f"{_ITEM_BLOCK_PREFIX}{value}",
         "elements": [
-            {"type": "button", "action_id": ACTION_EDIT,
-             "text": {"type": "plain_text", "text": "編集"}, "value": value},
-            {"type": "button", "action_id": ACTION_DELETE,
-             "text": {"type": "plain_text", "text": "削除"}, "value": value},
-            {"type": "button", "action_id": ACTION_SEND, "style": "primary",
-             "text": {"type": "plain_text", "text": "送信"}, "value": value,
-             "confirm": {
-                 "title": {"type": "plain_text", "text": "送信の確認 (1/2)"},
-                 "text": {"type": "mrkdwn", "text": "この下書きを送信しますか？次の画面でもう一度確認します。"},
-                 "confirm": {"type": "plain_text", "text": "次へ"},
-                 "deny": {"type": "plain_text", "text": "やめる"},
-             }},
+            {
+                "type": "button",
+                "action_id": ACTION_EDIT,
+                "text": {"type": "plain_text", "text": "編集"},
+                "value": value,
+            },
+            {
+                "type": "button",
+                "action_id": ACTION_DELETE,
+                "text": {"type": "plain_text", "text": "削除"},
+                "value": value,
+            },
+            {
+                "type": "button",
+                "action_id": ACTION_SEND,
+                "style": "primary",
+                "text": {"type": "plain_text", "text": "送信"},
+                "value": value,
+                "confirm": {
+                    "title": {"type": "plain_text", "text": "送信の確認 (1/2)"},
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "この下書きを送信しますか？次の画面でもう一度確認します。",
+                    },
+                    "confirm": {"type": "plain_text", "text": "次へ"},
+                    "deny": {"type": "plain_text", "text": "やめる"},
+                },
+            },
         ],
     }
 
@@ -113,8 +151,11 @@ def _sender_link(obj: Any) -> str:
 
 
 def _split_to_cc(items: list[DigestItem]) -> tuple[list[DigestItem], list[DigestItem]]:
-    cc = [it for it in items
-          if it.classification.recipient_kind == "cc" and not it.classification.is_actionable]
+    cc = [
+        it
+        for it in items
+        if it.classification.recipient_kind == "cc" and not it.classification.is_actionable
+    ]
     cc_ids = {id(it) for it in cc}
     to = [it for it in items if id(it) not in cc_ids]
     return to, cc
@@ -140,8 +181,10 @@ def _calendar_full_lines(d: Digest) -> list[str]:
     evs = d.calendar_events
     if not evs:
         return ["*今日の予定* — なし"]
-    timed = sorted((e for e in evs if not e.all_day and e.start),
-                   key=lambda e: e.start.timestamp() if e.start else 0.0)
+    timed = sorted(
+        (e for e in evs if not e.all_day and e.start),
+        key=lambda e: e.start.timestamp() if e.start else 0.0,
+    )
     allday = [e for e in evs if e.all_day]
     out = [f"*今日の予定*（{len(evs)}件）"]
     for e in timed[:_CAL_LIST_MAX]:
@@ -151,7 +194,9 @@ def _calendar_full_lines(d: Digest) -> list[str]:
         if e.conference_url:
             extra += f" <{e.conference_url}|会議リンク>"
         mark = " （未応答）" if e.response_status == "needsAction" else ""
-        out.append(f"`{_fmt_t(e.start)}`　{_ev_title(e)}{extra}{mark}")  # 時刻左＋予定＋会議室/参加URL
+        out.append(
+            f"`{_fmt_t(e.start)}`　{_ev_title(e)}{extra}{mark}"
+        )  # 時刻左＋予定＋会議室/参加URL
     if len(timed) > _CAL_LIST_MAX:
         out.append(f"`     `　ほか{len(timed) - _CAL_LIST_MAX}件")
     if allday:
@@ -167,7 +212,16 @@ def _remind_when(v: Any) -> str:
 
 
 def _reminder_line(v: Any) -> str:
-    """リマインド1行：〔カテゴリ〕 送信者(リンク) 件名 — N営業日放置。装飾絵文字なし。"""
+    """リマインド1行：〔カテゴリ〕 送信者(リンク) 件名 — N営業日放置。装飾絵文字なし。
+
+    source=="slack" は Slackメンション用に【メンション】〔#ch〕*@相手* 抜粋 — N営業日未返信。
+    """
+    if getattr(v, "source", "email") == "slack":
+        fs = v.first_seen.astimezone(_JST) if v.first_seen else None
+        tail = f"（{fs.month}/{fs.day}〜）" if fs else ""
+        who = f"*{v.sender}* " if v.sender else ""
+        body = (v.snippet or "").replace("\n", " ")
+        return f"【メンション】〔{v.subject}〕 {who}{body} — {v.business_days}営業日未返信{tail}"
     cat = _CAT_LABEL.get(v.category, "未返信")
     return f"〔{cat}〕 {_sender_link(v)}　{v.subject} — {_remind_when(v)}"
 
@@ -180,8 +234,12 @@ def _subject_link(it: DigestItem) -> str:
 def _item_text(it: DigestItem) -> str:
     """要対応メール（2行）：〔カテゴリ〕 *送信者* 件名(リンク) ・付記 / 要約。
     優先度は先頭のカテゴリ語と並び順で表現（色絵文字は使わない）。"""
-    flags = ("" + (" ・下書き" if it.draft else "") + (" ・締切" if _has_deadline(it) else "")
-             + (" ・要確認" if it.needs_review else ""))
+    flags = (
+        ""
+        + (" ・下書き" if it.draft else "")
+        + (" ・締切" if _has_deadline(it) else "")
+        + (" ・要確認" if it.needs_review else "")
+    )
     cat = _CAT_LABEL.get(it.category, it.category.value)
     head = f"〔{cat}〕 *{_short_sender(it.sender)}*　{_subject_link(it)}{flags}"
     return head + (f"\n{it.summary.one_liner}" if it.summary.one_liner else "")
@@ -230,7 +288,10 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
     """Slack Block Kit。引き算レイアウト・≤49ブロック。リマインド/To を先に積んで予算確保。"""
     to_items, _cc = _split_to_cc(d.items)  # Cc は要対応から除外（一覧/件数は出さない）
     blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"メールサマリー — {_date_label(d)}"}},
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"メールサマリー — {_date_label(d)}"},
+        },
     ]
     if not d.items and not d.quiet_counts and not _has_calendar(d) and not d.reminders:
         blocks.append(_section("*今日は静かです* — 新着の未読メールはありません。"))
