@@ -160,7 +160,9 @@ class WorkspaceGmail:
         本文はHTML（本文＋本人署名）＝Gmailでスレッド内インラインのリッチ返信欄で開く。
         戻り値: {draft_id, to, cc, subject}。thread 未指定なら get_thread で取得。"""
         th = thread or self.get_thread(thread_id)
-        m = th.last_inbound  # 相手の最新（自分の下書き/送信を除外＝Invalid To header を防ぐ）
+        # スレッドの「最新メッセージ」に返信＝自分が送信済みでもその後ろに連なる（下書きDRAFTのみ除外）。
+        # last_inbound（相手の最新）だと送信済みの手前の相手メールに返ってしまうため latest_real を使う。
+        m = th.latest_real or th.last_inbound
         h = {k.lower(): v for k, v in (m.headers if m else {}).items()}
         self_lc = (user_email or "").strip().lower()
 

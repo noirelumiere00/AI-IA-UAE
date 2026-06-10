@@ -219,3 +219,24 @@ def test_create_reply_draft_html_with_signature() -> None:
     payload = msg.get_payload(decode=True).decode("utf-8")
     assert "承知しました。<br>2行目です。" in payload  # 改行→<br>
     assert "署名テスト ベクトルグループ Vector Inc." in payload  # 本人署名を付与
+
+
+def test_create_reply_draft_targets_latest_even_after_own_sent() -> None:
+    # 追っかけ連絡：自分の送信済み(SENT)があっても、最新メッセージに連なり全返信する
+    import base64
+    th = {"id": "t1", "messages": [
+        {"id": "m1", "labelIds": ["INBOX"], "payload": {"headers": [
+            {"name": "From", "value": "client@x.com"}, {"name": "To", "value": "me@self.com"},
+            {"name": "Subject", "value": "依頼"}, {"name": "Message-Id", "value": "<a@x>"}]}},
+        {"id": "m2", "labelIds": ["SENT"], "payload": {"headers": [
+            {"name": "From", "value": "me@self.com"}, {"name": "To", "value": "client@x.com"},
+            {"name": "Cc", "value": "boss@self.com"}, {"name": "Message-Id", "value": "<b@self>"}]}},
+    ]}
+    g = WorkspaceGmail(OAuthToken("1//r"), service=FakeGmailService(th))
+    info = g.create_reply_draft(thread_id="t1", body="追って失礼します", user_email="me@self.com")
+    raw = base64.urlsafe_b64decode(
+        next(c for c in g._service.calls if c[0] == "drafts.create")[1]["body"]["message"]["raw"]  # type: ignore[attr-defined]
+    ).decode("utf-8")
+    assert "In-Reply-To: <b@self>" in raw                 # 最新(自分のSENT)に連なる（手前の相手メールでない）
+    assert "client@x.com" in info["to"] and "boss@self.com" in info["cc"]  # 最新の全宛先に返信
+    assert "me@self.com" not in info["to"] and "me@self.com" not in info["cc"]  # 自分除外
