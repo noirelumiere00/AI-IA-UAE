@@ -73,12 +73,28 @@ class _Users:
     def labels(self) -> _Labels:
         return _Labels(self.svc)
 
+    def settings(self) -> "_Settings":
+        return _Settings(self.svc)
+
+
+class _Settings:
+    def __init__(self, svc: "FakeGmailService") -> None:
+        self.svc = svc
+
+    def sendAs(self) -> "_Settings":
+        return self
+
+    def list(self, **kw: Any) -> _Exec:
+        return _Exec({"sendAs": [
+            {"sendAsEmail": "me@self.com", "isDefault": True, "signature": self.svc.signature}]})
+
 
 class FakeGmailService:
-    def __init__(self, thread_get: dict) -> None:
+    def __init__(self, thread_get: dict, signature: str = "") -> None:
         self.calls: list[tuple] = []
         self.labels: list[dict] = []
         self.thread_get = thread_get
+        self.signature = signature
 
     def users(self) -> _Users:
         return _Users(self)
@@ -182,3 +198,24 @@ def test_create_reply_draft_reply_all_excludes_self() -> None:
     mime = base64.urlsafe_b64decode(call[1]["body"]["message"]["raw"]).decode("utf-8")
     assert "To: sender@a.com, other1@b.com" in mime  # 全返信の宛先
     assert "Cc: other2@c.com" in mime and "In-Reply-To: <abc@a.com>" in mime
+
+
+def test_create_reply_draft_html_with_signature() -> None:
+    # HTML下書き：本文(改行→<br>)＋本人署名を含み、Content-Type=text/html
+    import base64
+    import email as _emaillib
+    th = {"id": "t1", "messages": [{"id": "m1", "snippet": "x", "payload": {"headers": [
+        {"name": "From", "value": "sender@a.com"},
+        {"name": "Subject", "value": "件名"},
+        {"name": "Message-Id", "value": "<abc@a.com>"},
+    ]}}]}
+    sig = '<div>署名テスト ベクトルグループ Vector Inc.</div>'
+    g = WorkspaceGmail(OAuthToken("1//r"), service=FakeGmailService(th, signature=sig))
+    g.create_reply_draft(thread_id="t1", body="承知しました。\n2行目です。", user_email="me@self.com")
+    call = next(c for c in g._service.calls if c[0] == "drafts.create")  # type: ignore[attr-defined]
+    raw = base64.urlsafe_b64decode(call[1]["body"]["message"]["raw"]).decode("utf-8")
+    msg = _emaillib.message_from_string(raw)
+    assert msg.get_content_type() == "text/html"  # リッチ書式
+    payload = msg.get_payload(decode=True).decode("utf-8")
+    assert "承知しました。<br>2行目です。" in payload  # 改行→<br>
+    assert "署名テスト ベクトルグループ Vector Inc." in payload  # 本人署名を付与

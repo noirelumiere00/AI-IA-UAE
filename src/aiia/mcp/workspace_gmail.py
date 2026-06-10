@@ -9,6 +9,7 @@ service を DI 可能＝テストは fake 注入で課金ゼロ。slack スロ�
 from __future__ import annotations
 
 import base64
+import html as _html
 from dataclasses import dataclass, field
 from email.mime.text import MIMEText
 from email.utils import getaddresses
@@ -133,12 +134,30 @@ class WorkspaceGmail:
         )
         return str(resp.get("id", ""))
 
+    def default_signature(self) -> str:
+        """既定 sendAs の署名(HTML)。下書きに本人署名を付けてネイティブ返信並みにする。
+        現スコープ(gmail.modify)で取得可。失敗時は ""（署名無しでも下書きは成立）。インスタンスにキャッシュ。"""
+        cached = getattr(self, "_sig_cache", None)
+        if cached is not None:
+            return str(cached)
+        sig = ""
+        try:
+            res = self._svc().users().settings().sendAs().list(userId="me").execute()
+            sends = res.get("sendAs", []) or []
+            default = next((s for s in sends if s.get("isDefault")), sends[0] if sends else {})
+            sig = str(default.get("signature", "") or "")
+        except Exception:  # noqa: BLE001 — 署名取得失敗でも下書きは作る
+            sig = ""
+        self._sig_cache = sig
+        return sig
+
     def create_reply_draft(
         self, *, thread_id: str, body: str, thread: Optional[EmailThread] = None,
         user_email: Optional[str] = None,
     ) -> dict:
         """**全返信(Reply-All)**下書き：To=元From＋元To、Cc=元Cc（いずれも自分を除外・重複排除）。
         件名=Re:・In-Reply-To/References 付き＝そのまま送信して成立。送信は人がGmailで2段確認。
+        本文はHTML（本文＋本人署名）＝Gmailでスレッド内インラインのリッチ返信欄で開く。
         戻り値: {draft_id, to, cc, subject}。thread 未指定なら get_thread で取得。"""
         th = thread or self.get_thread(thread_id)
         m = th.last_inbound  # 相手の最新（自分の下書き/送信を除外＝Invalid To header を防ぐ）
@@ -161,7 +180,11 @@ class WorkspaceGmail:
         if not subj.lower().startswith("re:"):
             subj = f"Re: {subj}"
         irt = h.get("message-id", "")
-        mime = MIMEText(body, _charset="utf-8")
+        # HTML本文＝AI本文(エスケープ＋改行→<br>) ＋ 本人署名。署名はGmailの自動付与が効かないので明示付与。
+        body_html = _html.escape(body).replace("\n", "<br>")
+        sig = self.default_signature()
+        full_html = f"<div dir=\"ltr\">{body_html}</div>" + (f"<br><br>{sig}" if sig else "")
+        mime = MIMEText(full_html, "html", "utf-8")
         mime["Subject"] = subj
         if to_list:
             mime["To"] = ", ".join(to_list)
