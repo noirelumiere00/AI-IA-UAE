@@ -7,15 +7,22 @@
 ラベルを1スコープでカバー) / calendar.readonly。送信は実行側で2段人間確認ゲートを通し、
 送信/破壊系を toolset に出さないことで安全を担保（scopeは広いが操作はコードで封じる）。
 """
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import json
 import os
 from typing import Any, Optional
 
 from aiia.auth.token_store import OAuthToken
+
+# 共通1リンク(universal)連携の番兵。state にこの値を署名して載せ、callback 側は
+# 「本人を state からではなく Google ログイン結果(id_token)から確定する」と判断する。
+# 実メールに `*` は使えないので衝突しない。HMAC 署名つき＝我々のサーバーしか発行できない。
+UNIVERSAL_STATE_EMAIL = "*universal*"
 
 # Workspace 全部入り（将来機能の再同意を回避・Internalなのでgoogle審査不要）。
 # 実際の操作はコード側で限定（誤送信ゼロ等）。gmailは modify 止まり（恒久削除のmail全権は付けない）。
@@ -23,13 +30,13 @@ WORKSPACE_SCOPES: tuple[str, ...] = (
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.modify",        # 読取+下書き+送信(drafts.send)+ラベル
-    "https://www.googleapis.com/auth/calendar",            # 予定 読取+作成/更新
-    "https://www.googleapis.com/auth/drive",               # Drive 読取+書込
-    "https://www.googleapis.com/auth/documents",           # Docs
-    "https://www.googleapis.com/auth/spreadsheets",        # Sheets（VSEO等）
-    "https://www.googleapis.com/auth/presentations",       # Slides
-    "https://www.googleapis.com/auth/contacts",            # People/連絡先
+    "https://www.googleapis.com/auth/gmail.modify",  # 読取+下書き+送信(drafts.send)+ラベル
+    "https://www.googleapis.com/auth/calendar",  # 予定 読取+作成/更新
+    "https://www.googleapis.com/auth/drive",  # Drive 読取+書込
+    "https://www.googleapis.com/auth/documents",  # Docs
+    "https://www.googleapis.com/auth/spreadsheets",  # Sheets（VSEO等）
+    "https://www.googleapis.com/auth/presentations",  # Slides
+    "https://www.googleapis.com/auth/contacts",  # People/連絡先
 )
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -58,7 +65,10 @@ def make_state(user_email: str, *, secret: Optional[bytes] = None) -> str:
 
 
 def verify_state(state: str, *, secret: Optional[bytes] = None) -> Optional[str]:
-    """state を検証し正しければ user_email を返す。改竄/CSRF/壊れた値は None。"""
+    """state を検証し正しければ user_email を返す。改竄/CSRF/壊れた値は None。
+
+    共通リンクの場合は UNIVERSAL_STATE_EMAIL を返す（呼び出し側が universal と判定）。
+    """
     sec = secret or _state_secret()
     try:
         raw = base64.urlsafe_b64decode(state.encode("ascii")).decode("utf-8")
@@ -67,6 +77,37 @@ def verify_state(state: str, *, secret: Optional[bytes] = None) -> Optional[str]
         return None
     expect = hmac.new(sec, email.encode("utf-8"), hashlib.sha256).hexdigest()
     return email if hmac.compare_digest(sig, expect) else None
+
+
+def make_universal_state(*, secret: Optional[bytes] = None) -> str:
+    """共通1リンク用の state（本人は Google ログインで確定）。HMAC署名で改竄不可。"""
+    return make_state(UNIVERSAL_STATE_EMAIL, secret=secret)
+
+
+def is_universal_email(email: Optional[str]) -> bool:
+    """verify_state の戻り値が共通リンク番兵かどうか。"""
+    return email == UNIVERSAL_STATE_EMAIL
+
+
+def email_from_id_token(id_token: Optional[str]) -> Optional[str]:
+    """Google の id_token(JWT) payload から **検証済み** メールを取り出す（正規化して返す）。
+
+    id_token は token endpoint との TLS 直結交換で得た値＝payload は信頼可能（ここでは署名再検証
+    はしない）。`email_verified` が真のときだけ返し、壊れた値・未確認メールは None。
+    """
+    if not id_token or id_token.count(".") < 2:
+        return None
+    try:
+        payload_b64 = id_token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    email = data.get("email")
+    verified = data.get("email_verified", False)
+    if not email or verified not in (True, "true", "True", 1):
+        return None
+    return str(email).strip().lower()
 
 
 def make_reply_token(user_email: str, thread_id: str, *, secret: Optional[bytes] = None) -> str:
@@ -134,6 +175,14 @@ class OAuthConsentFlow:
         )
         return str(url), state
 
+    def authorization_url_universal(self) -> tuple[str, str]:
+        """共通1リンク：誰でもタップ→自分のGoogleで連携（本人は id_token から確定）。"""
+        state = make_universal_state()
+        url, _ = self._flow().authorization_url(
+            access_type="offline", prompt="consent", state=state
+        )
+        return str(url), state
+
     def exchange(self, code: str) -> OAuthToken:
         os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
         flow = self._flow()
@@ -144,5 +193,7 @@ class OAuthConsentFlow:
                 "refresh_token を取得できません（access_type=offline / prompt=consent を確認）"
             )
         return OAuthToken(
-            refresh_token=str(creds.refresh_token), scopes=tuple(creds.scopes or self._scopes)
+            refresh_token=str(creds.refresh_token),
+            scopes=tuple(creds.scopes or self._scopes),
+            email=email_from_id_token(getattr(creds, "id_token", None)),  # 共通リンク時の本人特定
         )

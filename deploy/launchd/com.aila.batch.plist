@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AiLa 朝の自動配信（Mac常駐運用・EC2なしでも毎朝配る）。
+  平日 9:30（このMacのローカル時刻=JST）に `aila.sh batch` を実行。
+  導入（ユーザーが1回だけ）:
+    mkdir -p ~/Library/LaunchAgents /tmp/aila
+    cp deploy/launchd/com.aila.batch.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.aila.batch.plist
+  解除:
+    launchctl unload -w ~/Library/LaunchAgents/com.aila.batch.plist
+  ※ Mac がスリープ/電源オフだとその時刻は走らない → `aila.sh up` の keepalive 併用 or 案B(EC2)。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.aila.batch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd /Users/s-komata/Documents/AI-IA-UAE &amp;&amp; ./scripts/aila.sh batch</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/tmp/aila/batch.out.log</string>
+  <key>StandardErrorPath</key><string>/tmp/aila/batch.err.log</string>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

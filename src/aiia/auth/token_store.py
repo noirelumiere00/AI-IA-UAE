@@ -17,13 +17,19 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 @dataclass(frozen=True, repr=False)
 class OAuthToken:
-    """1ユーザー分の refresh token（＋認可済みスコープ）。repr で token を伏せる。"""
+    """1ユーザー分の refresh token（＋認可済みスコープ）。repr で token を伏せる。
+
+    email は共通1リンク(universal)連携時に **Google の id_token から確定した本人メール**。
+    個別リンク連携では state からメールが分かるので未設定(None)でよい。保存(DynamoDB)は
+    user_email を PK にするため email 欄自体は永続化しない（連携時の本人特定にのみ使う）。
+    """
 
     refresh_token: str
     scopes: tuple[str, ...] = ()
+    email: Optional[str] = None
 
     def __repr__(self) -> str:
-        return f"OAuthToken(refresh_token=***, scopes={self.scopes!r})"
+        return f"OAuthToken(refresh_token=***, scopes={self.scopes!r}, email={self.email!r})"
 
 
 def _norm(email: str) -> str:

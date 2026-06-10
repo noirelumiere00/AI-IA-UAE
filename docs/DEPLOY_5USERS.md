@@ -42,24 +42,21 @@ cloudflared tunnel --url http://localhost:8788 --protocol http2
 ```
 → 公開URL（例 `https://xxxx.trycloudflare.com`）が手に入る。**ホスト(Mac)が起きている間だけ有効**。
 
-### 案B：小型EC2＋Caddy（堅牢・Mac非依存・本番）
+### 案B：小型EC2＋Caddy（堅牢・Mac非依存・本番）← **deploy.sh でほぼ1コマンド**
+あなたがやるのは **4つだけ**（残りは `deploy/deploy.sh` が自動）:
+1. Ubuntu 22.04+ の小型EC2(t3.small程度)を起動し、SGで **22/80/443** を開放。
+2. ドメイン（例 `connect-aila.vectorinc.co.jp`）の **A/AAAA を EC2 のIP** に向ける。
+3. このリポジトリ一式を EC2 に置く（`git clone` / `rsync` / `scp` いずれか）。
+4. 本物の **`.env.aila`（perm600）をリポジトリ直下** に置く（秘密・git禁止）。
+
+その後サーバーで1回:
 ```bash
-# EC2(Ubuntu, t3.small程度) を用意し、22/80/443 を開放、ドメインのA/AAAAを向ける。
-# サーバーで：
-sudo useradd -m -d /opt/aila aila            # 専用ユーザー
-sudo git clone <repo> /opt/aila && cd /opt/aila
-sudo -u aila python3 -m venv .venv && sudo -u aila .venv/bin/pip install -e '.[multiuser,bedrock]'
-sudo -u aila cp <あなたの.env.aila> /opt/aila/.env.aila && sudo chmod 600 /opt/aila/.env.aila
-# Caddy（自動HTTPS）
-sudo apt install -y caddy
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # <DOMAIN> を置換
-sudo systemctl reload caddy
-# 常駐（systemd）
-sudo cp deploy/systemd/aila-*.service deploy/systemd/aila-batch.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now aila-connect aila-serve aila-batch.timer
+sudo bash deploy/deploy.sh connect-aila.vectorinc.co.jp
+#   → aila専用ユーザー作成 / /opt/aila配置 / venv+依存 / Caddy(自動HTTPS) /
+#     systemd で connect-web・serve 常駐 + 朝バッチ(平日9:30 JST) 有効化（冪等）。
 ```
-→ 公開URL = `https://<DOMAIN>`（Caddyが自動でHTTPS）。serve常駐＋朝バッチ(平日9:30 JST)も同時に有効。
+→ 公開URL = `https://<DOMAIN>`（Caddyが自動でHTTPS）。serve常駐＋朝バッチも同時に有効。
+完了後にスクリプトが「残りの3手（env本番URL化 / GCP redirect_uri追加 / 共通リンク発行）」を表示する。
 
 ---
 
@@ -68,26 +65,41 @@ sudo systemctl enable --now aila-connect aila-serve aila-batch.timer
 # .env.aila（127.0.0.1:8788 → 公開URLに）
 #   OAUTH_REDIRECT_URI=https://<公開URL>/oauth2/callback
 #   CONNECT_BASE_URL=https://<公開URL>
+#   AIIA_CONNECT_ALLOWED_DOMAINS=vectorinc.co.jp   # 共通リンクの連携を社用ドメインに限定（推奨）
+#     ※複数なら "vectorinc.co.jp jock.co.jp" のように空白/カンマ区切り。
+#     未設定でも AIIA_DEFAULT_INTERNAL_DOMAIN(=vectorinc.co.jp) に自動で絞られる。
 source .env.aila && ./scripts/aila.sh check     # https で ✓ になるか
 ```
 - **GCP（pgd1 OAuthクライアント）**：APIs&Services → 認証情報 → pgd1 → 「承認済みのリダイレクトURI」に
   `https://<公開URL>/oauth2/callback` を**追加**して保存（既存の localhost は残してOK）。
+  ※ **共通1リンク連携(STEP3 案C)を使うなら、この登録が必須**（未登録だと redirect_uri_mismatch）。
 
 ---
 
-## STEP 3: 5名を連携する（🧑‍💼＋🤖）
-### 既にTeamAgentで連携済み → 移行（/connect不要・一瞬）
+## STEP 3: 5名を連携する（🧑‍💼＋🤖）― 3案。**おすすめは案C（共通1リンク）**
+### 案C：共通1リンクをSlackに貼る（全員タップで連携・本人はGoogleで確定）★推奨
+1本のURLを発行し、Slackのチームチャンネル/DMに貼るだけ。各人がタップ→自分のGoogleで「許可」→完了。
+誰が踏んでも**自分のメール専用**に連携される（本人は Google ログイン結果=id_token で確定）。
+```bash
+source .env.aila && ./scripts/aila.sh connect-url   # 共通1リンク(URL1行)を出力
+#  → このURLをSlackに貼る。各人タップ→「許可」→「✅ 連携が完了しました」。
+./scripts/aila.sh smoke                             # 連携済みに人数が増えるのを確認
+```
+- **安全**：`AIIA_CONNECT_ALLOWED_DOMAINS`（or `AIIA_DEFAULT_INTERNAL_DOMAIN`）で**社用ドメイン以外は自動で弾く**。
+- **前提**：STEP2 の GCP redirect_uri 登録が必須（公開URLの `/oauth2/callback`）。
+- URLは公開URL（redirect_uri）に紐づく＝**公開先を変えたら再発行**。
+
+### 案A：既にTeamAgentで連携済み → 移行（誰のクリックも不要・一瞬）
 ```bash
 export DATABASE_URL='postgresql://...teamagent...'   # SSM踏み台等でRDS到達
-./scripts/aila.sh migrate --dry-run                  # 誰が来るか件数だけ
+./scripts/aila.sh migrate --dry-run                  # 誰が来るか件数だけ（書込なし）
 ./scripts/aila.sh migrate                            # 本移行（RDS→DynamoDB）
 ./scripts/aila.sh smoke                              # → 連携済みに5名出ればOK
 ```
-### 新規（未連携） → 各自 /connect（1クリックAllow）
+### 案B：個別リンク（本人専用URLを1人ずつ配る）
 ```bash
 ./scripts/aila.sh connect-link a@vectorinc.co.jp b@... ...   # email<TAB>URL を発行
-#  各人にURLを送る or Slackで /connect → 出たURLで「許可」→ 「✅連携完了」
-./scripts/aila.sh smoke                                       # 5名出現を確認
+./scripts/aila.sh smoke                                       # 人数を確認
 ```
 
 ---

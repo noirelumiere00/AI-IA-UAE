@@ -2,6 +2,7 @@
 
 google ライブラリ不要の範囲（state/scopes/env解決/未設定エラー）を検証＝課金ゼロ・依存最小。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -26,8 +27,16 @@ def test_state_tamper_rejected() -> None:
 
 def test_scopes_workspace_inclusive() -> None:
     joined = " ".join(of.WORKSPACE_SCOPES)
-    for s in ("gmail.modify", "/auth/calendar", "/auth/drive", "documents",
-              "spreadsheets", "presentations", "contacts", "userinfo.email"):
+    for s in (
+        "gmail.modify",
+        "/auth/calendar",
+        "/auth/drive",
+        "documents",
+        "spreadsheets",
+        "presentations",
+        "contacts",
+        "userinfo.email",
+    ):
         assert s in joined, s
     assert "https://mail.google.com/" not in joined  # mail全権(恒久削除)は付けない
 
@@ -65,7 +74,10 @@ def test_build_user_credentials_requires_refresh(monkeypatch: pytest.MonkeyPatch
 
 def test_reply_token_roundtrip() -> None:
     tok = of.make_reply_token(" Alice@X.com ", "thr123", secret=_SECRET)
-    assert of.verify_reply_token(tok, secret=_SECRET) == ("alice@x.com", "thr123")  # 正規化・email+tid復元
+    assert of.verify_reply_token(tok, secret=_SECRET) == (
+        "alice@x.com",
+        "thr123",
+    )  # 正規化・email+tid復元
 
 
 def test_reply_token_tamper_rejected() -> None:
@@ -80,3 +92,36 @@ def test_make_reply_url(monkeypatch: pytest.MonkeyPatch) -> None:
     url = of.make_reply_url("a@x.com", "tid9")
     assert url.startswith("http://localhost:8788/reply?s=")
     assert of.verify_reply_token(url.split("s=", 1)[1]) == ("a@x.com", "tid9")
+
+
+def _fake_id_token(email: str, *, verified: object = True) -> str:
+    import base64 as _b64
+    import json as _json
+
+    payload = (
+        _b64.urlsafe_b64encode(
+            _json.dumps({"email": email, "email_verified": verified}).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+    return f"header.{payload}.sig"  # 署名は使わない（payloadのみ復号）
+
+
+def test_universal_state_roundtrip() -> None:
+    state = of.make_universal_state(secret=_SECRET)
+    decoded = of.verify_state(state, secret=_SECRET)
+    assert of.is_universal_email(decoded)  # 共通リンク番兵として復元
+    assert not of.is_universal_email("alice@x.com")
+
+
+def test_email_from_id_token_verified() -> None:
+    assert of.email_from_id_token(_fake_id_token("  Bob@Vector.co.jp ")) == "bob@vector.co.jp"
+    assert of.email_from_id_token(_fake_id_token("x@y.com", verified="true")) == "x@y.com"
+
+
+def test_email_from_id_token_unverified_or_garbage() -> None:
+    assert of.email_from_id_token(_fake_id_token("x@y.com", verified=False)) is None  # 未確認は拒否
+    assert of.email_from_id_token("not-a-jwt") is None
+    assert of.email_from_id_token(None) is None
+    assert of.email_from_id_token("only.two") is None
