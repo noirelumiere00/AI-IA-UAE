@@ -160,3 +160,25 @@ def test_toolset_from_token_and_noop_slack() -> None:
     assert ts.gmail.get_thread("t1").thread_id == "t1"  # gmail 経由で動く（MCPToolset 準拠）
     ts.slack.send_draft(channel="me", blocks=[{}], text="x")  # No-op（配信は別層）
     assert ts.calls == [("send_draft", "me", 1)]
+
+
+def test_create_reply_draft_reply_all_excludes_self() -> None:
+    # 全返信：To=元From＋元To（自分除く）／Cc=元Cc（自分除く・To重複除く）
+    import base64
+    th = {"id": "t1", "messages": [{"id": "m1", "snippet": "x", "payload": {"headers": [
+        {"name": "From", "value": "Sender <sender@a.com>"},
+        {"name": "To", "value": "me@self.com, One <other1@b.com>"},
+        {"name": "Cc", "value": "other2@c.com, me@self.com"},
+        {"name": "Subject", "value": "案件"},
+        {"name": "Message-Id", "value": "<abc@a.com>"},
+    ]}}]}
+    g = WorkspaceGmail(OAuthToken("1//r"), service=FakeGmailService(th))
+    info = g.create_reply_draft(thread_id="t1", body="承知しました", user_email="me@self.com")
+    assert "sender@a.com" in info["to"] and "other1@b.com" in info["to"]
+    assert "me@self.com" not in info["to"] and "me@self.com" not in info["cc"]
+    assert info["cc"] == "other2@c.com"  # 自分・To重複を除いた元Cc
+    assert info["subject"] == "Re: 案件"  # 件名Re:付（MIMEでは日本語がRFC2047符号化される）
+    call = next(c for c in g._service.calls if c[0] == "drafts.create")  # type: ignore[attr-defined]
+    mime = base64.urlsafe_b64decode(call[1]["body"]["message"]["raw"]).decode("utf-8")
+    assert "To: sender@a.com, other1@b.com" in mime  # 全返信の宛先
+    assert "Cc: other2@c.com" in mime and "In-Reply-To: <abc@a.com>" in mime

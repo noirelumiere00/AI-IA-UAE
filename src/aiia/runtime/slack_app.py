@@ -72,7 +72,8 @@ def build_handler_deps(
         llm = build_llm(load_platform())
         summary = llm.summarize(thread)
         draft = llm.draft(thread, summary, load_user(email))
-        info = gmail.create_reply_draft(thread_id=thread_id, body=draft.body, thread=thread)
+        info = gmail.create_reply_draft(
+            thread_id=thread_id, body=draft.body, thread=thread, user_email=email)  # 全返信(自分除外)
         return {**info, "body": draft.body}
 
     return HandlerDeps(

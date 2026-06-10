@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 from email.mime.text import MIMEText
+from email.utils import getaddresses
 from typing import Any, Optional
 
 from aiia.auth.google_creds import build_user_credentials
@@ -133,22 +134,39 @@ class WorkspaceGmail:
         return str(resp.get("id", ""))
 
     def create_reply_draft(
-        self, *, thread_id: str, body: str, thread: Optional[EmailThread] = None
+        self, *, thread_id: str, body: str, thread: Optional[EmailThread] = None,
+        user_email: Optional[str] = None,
     ) -> dict:
-        """**返信**下書きを作成（宛先=元差出人・件名=Re:・In-Reply-Id 付き＝送信して成立する下書き）。
-        戻り値: {draft_id, to, subject}。thread 未指定なら get_thread で取得。"""
+        """**全返信(Reply-All)**下書き：To=元From＋元To、Cc=元Cc（いずれも自分を除外・重複排除）。
+        件名=Re:・In-Reply-To/References 付き＝そのまま送信して成立。送信は人がGmailで2段確認。
+        戻り値: {draft_id, to, cc, subject}。thread 未指定なら get_thread で取得。"""
         th = thread or self.get_thread(thread_id)
-        m = th.last_inbound  # 返信先＝相手の最新（自分の下書き/送信を除外＝Invalid To header を防ぐ）
+        m = th.last_inbound  # 相手の最新（自分の下書き/送信を除外＝Invalid To header を防ぐ）
         h = {k.lower(): v for k, v in (m.headers if m else {}).items()}
-        to = h.get("from", "")  # 返信先＝元の差出人
+        self_lc = (user_email or "").strip().lower()
+
+        def _addrs(*header_values: str) -> list[str]:
+            out: list[str] = []
+            for _name, addr in getaddresses([v for v in header_values if v]):
+                a = addr.strip().lower()
+                if a and a != self_lc and a not in out:  # 自分除外・重複排除・順序保持
+                    out.append(a)
+            return out
+
+        to_list = _addrs(h.get("from", ""), h.get("to", ""))          # 元From＋元To
+        cc_list = [a for a in _addrs(h.get("cc", "")) if a not in to_list]  # 元Cc（Toと重複は除外）
+        if not to_list and h.get("from"):
+            to_list = [h["from"]]  # フォールバック（最低限 差出人へ）
         subj = th.subject or h.get("subject", "")
         if not subj.lower().startswith("re:"):
             subj = f"Re: {subj}"
         irt = h.get("message-id", "")
         mime = MIMEText(body, _charset="utf-8")
         mime["Subject"] = subj
-        if to:
-            mime["To"] = to
+        if to_list:
+            mime["To"] = ", ".join(to_list)
+        if cc_list:
+            mime["Cc"] = ", ".join(cc_list)
         if irt:
             mime["In-Reply-To"] = irt
             mime["References"] = irt
@@ -160,7 +178,8 @@ class WorkspaceGmail:
             .create(userId="me", body={"message": {"threadId": thread_id, "raw": raw}})
             .execute()
         )
-        return {"draft_id": str(resp.get("id", "")), "to": to, "subject": subj}
+        return {"draft_id": str(resp.get("id", "")), "to": ", ".join(to_list),
+                "cc": ", ".join(cc_list), "subject": subj}
 
     def _label_id(self, label: str) -> str:
         svc = self._svc()
