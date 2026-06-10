@@ -15,7 +15,7 @@ def test_text_has_header_categories_and_unsent(
 ) -> None:
     txt = render_digest_text(run(make_deps(tools, dry_run=True)).digest)
     assert "メールサマリー" in txt
-    assert "✉️ 要対応メール" in txt and "🔴" in txt  # カテゴリ見出し廃止・色は行頭
+    assert "要対応メール" in txt and "〔" in txt  # カテゴリ見出し廃止・先頭に〔カテゴリ語〕
     assert "CLIENT_URGENT (" not in txt              # カテゴリ見出しは出さない
     assert "未送信" in txt                            # 下書きがあるので未送信注意
 
@@ -83,8 +83,8 @@ def test_to_shown_and_cc_collapsed_to_count() -> None:
     d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
                items=[_ditem("to"), _ditem("cc"), _ditem("cc")])
     txt = render_digest_text(d)
-    assert "✉️ 要対応メール" in txt
-    assert "👥 CC 2" in txt  # CcはグループでなくCC件数に
+    assert "要対応メール" in txt
+    assert "CC 2" in txt  # CcはグループでなくCC件数に
 
 
 def test_to_top5_fold_within_limit() -> None:

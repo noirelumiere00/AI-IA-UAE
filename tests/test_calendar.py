@@ -81,9 +81,9 @@ def test_calendar_full_lines_vertical_time_left() -> None:
         CalendarEvent(event_id="c", title="定例", start=datetime(2026, 6, 9, 14, 0, tzinfo=JST)),
     ])
     out = _calendar_full_lines(d)
-    assert "`10:00`　商談 ❓未応答" in out      # 時刻左(コードスパン)＋全角space＋予定右
+    assert "`10:00`　商談 （未応答）" in out      # 時刻左(コードスパン)＋全角space＋予定右
     assert "`14:00`　定例" in out               # 1件1行（縦並び）
-    assert "🗓 終日: 終日休暇" in "\n".join(out)
+    assert "終日： 終日休暇" in "\n".join(out)
 
 
 def test_calendar_full_lines_folds_over_max() -> None:
@@ -120,4 +120,4 @@ def test_calendar_full_lines_shows_room_and_join() -> None:
     d = _digest([CalendarEvent(event_id="a", title="商談", start=datetime(2026, 6, 9, 14, 0, tzinfo=JST),
                                conference_url="https://meet.google.com/abc", location="会議室E")])
     txt = "\n".join(_calendar_full_lines(d))
-    assert "📍会議室E" in txt and "meet.google.com/abc" in txt and "🔗参加" in txt
+    assert "会議室E" in txt and "meet.google.com/abc" in txt and "会議リンク" in txt
