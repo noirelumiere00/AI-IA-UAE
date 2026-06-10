@@ -78,13 +78,13 @@ def test_split_to_cc_promotes_actionable_cc() -> None:
     assert {id(x) for x in to} == {id(to_only), id(cc_act), id(unknown)}  # 要返信Cc/不明はTo側
 
 
-def test_to_shown_and_cc_collapsed_to_count() -> None:
-    # 引き算後：To は「要対応メール」に個別、CC は件数1行に畳む
+def test_to_shown_and_cc_excluded() -> None:
+    # 引き算後：To は「要対応メール」に個別、情報共有Ccは表示も件数も出さない（参考行は廃止）
     d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
                items=[_ditem("to"), _ditem("cc"), _ditem("cc")])
     txt = render_digest_text(d)
-    assert "要対応メール" in txt
-    assert "CC 2" in txt  # CcはグループでなくCC件数に
+    assert "要対応メール（1）" in txt  # Toの1件だけ
+    assert "CC" not in txt and "参考" not in txt  # Cc件数行は出さない
 
 
 def test_to_top5_fold_within_limit() -> None:

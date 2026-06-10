@@ -153,16 +153,6 @@ def _calendar_full_lines(d: Digest) -> list[str]:
 
 
 # ── 各項目 ────────────────────────────────────────────────────────────────────
-def _misc_line(d: Digest, cc_items: list[DigestItem]) -> Optional[str]:
-    parts = []
-    if cc_items:
-        parts.append(f"CC {len(cc_items)}")
-    qn = sum(d.quiet_counts.values())
-    if qn:
-        parts.append(f"一般 {qn}")
-    return ("参考： " + " ・ ".join(parts) + "（件数のみ）") if parts else None
-
-
 def _remind_when(v: Any) -> str:
     fs = v.first_seen.astimezone(_JST) if v.first_seen else None
     tail = f"（{fs.month}/{fs.day}〜）" if fs else ""
@@ -196,7 +186,7 @@ def _sorted(items: list[DigestItem]) -> list[DigestItem]:
 
 # ── テキスト（dry-run）─────────────────────────────────────────────────────────
 def render_digest_text(d: Digest) -> str:
-    to_items, cc_items = _split_to_cc(d.items)
+    to_items, _cc = _split_to_cc(d.items)  # Cc は要対応から除外（一覧/件数は出さない）
     lines = [f"メールサマリー — {_date_label(d)}"]
     empty = not d.items and not d.quiet_counts and not _has_calendar(d) and not d.reminders
     if empty:
@@ -212,9 +202,6 @@ def render_digest_text(d: Digest) -> str:
                 lines.append(f"  {ln}")
         if len(to_items) > _TO_TOP:
             lines.append(f"  ほか{len(to_items) - _TO_TOP}件")
-    misc = _misc_line(d, cc_items)
-    if misc:
-        lines.append(f"\n{misc}")
     if _has_calendar(d):
         lines.append("")
         lines.extend(_calendar_full_lines(d))
@@ -234,7 +221,7 @@ def _ctx(text: str) -> dict:
 
 def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
     """Slack Block Kit。引き算レイアウト・≤49ブロック。リマインド/To を先に積んで予算確保。"""
-    to_items, cc_items = _split_to_cc(d.items)
+    to_items, _cc = _split_to_cc(d.items)  # Cc は要対応から除外（一覧/件数は出さない）
     blocks: list[dict] = [
         {"type": "header", "text": {"type": "plain_text", "text": f"メールサマリー — {_date_label(d)}"}},
     ]
@@ -270,11 +257,6 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
                 blocks.append(_item_actions(it.gmail_draft_id or it.thread_id))
         if len(to_items) > _TO_TOP:
             truncated += len(to_items) - _TO_TOP
-
-    # CC ・ 一般（1行）
-    misc = _misc_line(d, cc_items)
-    if misc and _room():
-        blocks.append(_ctx(misc))
 
     # 今日の予定（フル・下部）
     if _has_calendar(d) and _room():

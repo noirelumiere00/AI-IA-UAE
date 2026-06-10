@@ -23,8 +23,6 @@ from aiia.delivery.slack import (
     ACTION_REMIND_SNOOZE,
     ACTION_REMIND_UNDO,
     ACTION_SEND,
-    _item_actions,
-    _section,
 )
 from aiia.mcp.workspace_gmail import WorkspaceGmail, WorkspaceGmailSender
 from aiia.runtime.slack_handlers import (
@@ -211,25 +209,23 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
 
     @app.action(ACTION_REMIND_REPLY)
     async def on_remind_reply(ack: Any, body: Any, client: Any) -> None:
+        # 対応する＝下書きを作成し、Gmailの該当スレッド（下書き表示）へ飛ぶリンクを返す。
+        # 編集・送信はGmail側で行う（Slack内の編集/送信フローは廃止）。
         await ack()
         tid, uid = body["actions"][0]["value"], body["user"]["id"]
         ch = body["channel"]["id"]
-        ts = body["message"].get("ts")
-        # ① 即座にプレースホルダ（@mention＋reply_broadcastで本体DMにも表示＝自動で気づける）
-        ph = await client.chat_postMessage(
-            channel=ch, thread_ts=ts, reply_broadcast=True,
-            text=f"<@{uid}> ✏️ 返信下書きを作成しています…", unfurl_links=False, unfurl_media=False)
+        ph = await client.chat_postMessage(channel=ch, text=f"<@{uid}> 返信下書きを作成しています…",
+                                           unfurl_links=False, unfurl_media=False)
         ph_ts = ph.get("ts")
-        # ② LLMで下書き生成 → プレースホルダを chat_update で差し替え（体感ラグ解消）
         info = await _run(lambda: handle_remind_reply(deps, slack_user_id=uid, thread_id=tid))
+        link = info.get("gmail_link", "")
         if info.get("draft_id"):
-            preview = (f"✏️ *返信下書きを作成しました*（Gmailの下書きにも保存済）\n"
-                       f"宛先: {info.get('to', '')}\n件名: {info.get('subject', '')}\n\n{info.get('body', '')}")
-            await client.chat_update(channel=ch, ts=ph_ts, text="返信下書きを作成しました",
-                                     blocks=[_section(preview), _item_actions(info["draft_id"])])
+            msg = (f"<@{uid}> 返信下書きを作成しました（Gmailの下書きに保存済）。\n"
+                   f"件名: {info.get('subject', '')}\n"
+                   f"<{link}|Gmailでスレッドを開く（下書きを確認して送信）>")
         else:
-            await client.chat_update(channel=ch, ts=ph_ts,
-                                     text=f"Gmailで返信してください: {info.get('gmail_link', '')}")
+            msg = f"<@{uid}> <{link}|Gmailでスレッドを開いて返信する>"
+        await client.chat_update(channel=ch, ts=ph_ts, text=msg)
 
     # 押下フィードバック＝**メインDMに直接**返信（スレッドに埋もれさせない＝[↩取り消す]が必ず見える）。
     # 戻り値tsに✅等のスタンプを付ける（その同じメッセージのundoでスタンプも外れる）。
