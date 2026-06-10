@@ -34,8 +34,11 @@ brew install cloudflared
 # 2) connect-web を起動（別ターミナル・常駐）
 cd ~/Documents/AI-IA-UAE && source .env.aila && ./scripts/aila.sh connect-web   # 127.0.0.1:8788
 # 3) トンネルを張る（無料の試用URL。表示された https://xxxx.trycloudflare.com を控える）
-cloudflared tunnel --url http://localhost:8788
+cloudflared tunnel --url http://localhost:8788 --protocol http2
+#    ⚠️ 会社NW/プロキシは QUIC(UDP) を塞ぐことが多い → 必ず `--protocol http2`（TCP443）。
+#       （QUICのままだと "Failed to dial quic ... timeout" で 530 になる。実測で確認済）
 #    本番運用は「名前付きトンネル」で固定ドメイン推奨（cloudflared tunnel login → create → route dns）
+#    ※ trycloudflare の試用URLは再起動で変わる＝固定化するなら named tunnel か案B(EC2)へ。
 ```
 → 公開URL（例 `https://xxxx.trycloudflare.com`）が手に入る。**ホスト(Mac)が起きている間だけ有効**。
 
