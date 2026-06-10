@@ -61,3 +61,22 @@ def test_build_user_credentials_requires_refresh(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "sec")
     with pytest.raises(ValueError):
         build_user_credentials(OAuthToken(""))  # refresh_token 空→拒否
+
+
+def test_reply_token_roundtrip() -> None:
+    tok = of.make_reply_token(" Alice@X.com ", "thr123", secret=_SECRET)
+    assert of.verify_reply_token(tok, secret=_SECRET) == ("alice@x.com", "thr123")  # 正規化・email+tid復元
+
+
+def test_reply_token_tamper_rejected() -> None:
+    tok = of.make_reply_token("a@x.com", "t1", secret=_SECRET)
+    assert of.verify_reply_token(tok, secret=b"other-secret") is None  # 鍵違い
+    assert of.verify_reply_token("not-base64!!", secret=_SECRET) is None
+
+
+def test_make_reply_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OAUTH_STATE_SECRET", "x" * 64)
+    monkeypatch.setenv("CONNECT_BASE_URL", "http://localhost:8788")
+    url = of.make_reply_url("a@x.com", "tid9")
+    assert url.startswith("http://localhost:8788/reply?s=")
+    assert of.verify_reply_token(url.split("s=", 1)[1]) == ("a@x.com", "tid9")

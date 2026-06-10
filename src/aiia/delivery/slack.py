@@ -41,13 +41,20 @@ ACTION_REMIND_UNDO = "aiia_remind_undo"
 _REMIND_BLOCK_PREFIX = "aiia_remind_"
 
 
-def _reminder_actions(thread_id: str) -> dict:
+def _reminder_actions(thread_id: str, reply_url: Optional[str] = None) -> dict:
+    # 対応する：reply_url ありは url-button（1クリックで /reply→下書き作成→Gmailへ自動リダイレクト）、
+    # 無しは従来の action-button（押す→下書き作成→リンク）。
+    reply_btn: dict = {"type": "button", "action_id": ACTION_REMIND_REPLY, "style": "primary",
+                       "text": {"type": "plain_text", "text": "対応する"}}
+    if reply_url:
+        reply_btn["url"] = reply_url
+    else:
+        reply_btn["value"] = thread_id
     return {
         "type": "actions",
         "block_id": f"{_REMIND_BLOCK_PREFIX}{thread_id}",
         "elements": [
-            {"type": "button", "action_id": ACTION_REMIND_REPLY, "style": "primary",
-             "text": {"type": "plain_text", "text": "対応する"}, "value": thread_id},
+            reply_btn,
             {"type": "button", "action_id": ACTION_REMIND_DISMISS,
              "text": {"type": "plain_text", "text": "対応済み"}, "value": thread_id},
             {"type": "button", "action_id": ACTION_REMIND_SNOOZE,
@@ -243,7 +250,7 @@ def render_slack_blocks(d: Digest, *, interactive: bool = False) -> list[dict]:
                 continue
             blocks.append(_section(_reminder_line(v)))
             if interactive and _room():
-                blocks.append(_reminder_actions(v.thread_id))
+                blocks.append(_reminder_actions(v.thread_id, getattr(v, "reply_url", None)))
 
     # 要対応メール（Top5・カテゴリ見出し無し・先頭に〔カテゴリ語〕）
     if to_items:

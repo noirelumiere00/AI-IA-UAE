@@ -186,6 +186,7 @@ class ReminderView(BaseModel):
     business_days: int = 0      # 未返信の営業日数
     first_seen: Optional[datetime] = None
     gmail_link: Optional[str] = None
+    reply_url: Optional[str] = None  # [対応する]url-button用（/reply?s=署名）。未設定なら従来のaction-button。
 
 
 class Digest(BaseModel):

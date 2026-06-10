@@ -95,3 +95,13 @@ def test_to_top5_fold_within_limit() -> None:
     assert len(blocks) <= 49
     assert any("要対応メール" in str(b) for b in blocks)   # To見出しは残る
     assert any("省略" in str(b) for b in blocks)          # Top5超は省略表記
+
+
+def test_reminder_actions_url_button_vs_action() -> None:
+    from aiia.delivery.slack import ACTION_REMIND_REPLY, _reminder_actions
+    u = _reminder_actions("t1", reply_url="http://localhost:8788/reply?s=z")
+    btn = u["elements"][0]
+    assert btn["action_id"] == ACTION_REMIND_REPLY and btn.get("url") == "http://localhost:8788/reply?s=z"
+    assert "value" not in btn  # url-button は value を載せない（handlerがackのみで判別）
+    a = _reminder_actions("t1")  # reply_url 無し＝従来の action-button
+    assert a["elements"][0].get("value") == "t1" and "url" not in a["elements"][0]

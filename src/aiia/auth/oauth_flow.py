@@ -69,6 +69,33 @@ def verify_state(state: str, *, secret: Optional[bytes] = None) -> Optional[str]
     return email if hmac.compare_digest(sig, expect) else None
 
 
+def make_reply_token(user_email: str, thread_id: str, *, secret: Optional[bytes] = None) -> str:
+    """{email}.{thread_id} を HMAC 署名（/reply の改竄防止）。email+thread_idのみ＝PII最小。"""
+    sec = secret or _state_secret()
+    email = user_email.strip().lower()
+    msg = f"{email}.{thread_id}"
+    sig = hmac.new(sec, msg.encode("utf-8"), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{msg}.{sig}".encode()).decode("ascii")
+
+
+def verify_reply_token(token: str, *, secret: Optional[bytes] = None) -> Optional[tuple[str, str]]:
+    """/reply トークンを検証し (user_email, thread_id) を返す。改竄/壊れた値は None。"""
+    sec = secret or _state_secret()
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        email, thread_id, sig = raw.rsplit(".", 2)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    expect = hmac.new(sec, f"{email}.{thread_id}".encode(), hashlib.sha256).hexdigest()
+    return (email, thread_id) if hmac.compare_digest(sig, expect) else None
+
+
+def make_reply_url(user_email: str, thread_id: str, *, base_url: Optional[str] = None) -> str:
+    """[対応する]url-button用の完全URL。base_url 未指定は CONNECT_BASE_URL env（既定 localhost:8788）。"""
+    base = (base_url or os.environ.get("CONNECT_BASE_URL") or "http://localhost:8788").rstrip("/")
+    return f"{base}/reply?s={make_reply_token(user_email, thread_id)}"
+
+
 class OAuthConsentFlow:
     """google-auth-oauthlib Flow の薄いラッパ（同意URL生成 + code交換）。"""
 

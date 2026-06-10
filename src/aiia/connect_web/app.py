@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional
 
 from aiia.auth.oauth_flow import OAuthConsentFlow
 from aiia.auth.token_store import TokenStore
-from aiia.connect_web.callback import process_callback
+from aiia.connect_web.callback import process_callback, process_reply
 
 
 def _html(title: str, detail: str) -> str:
@@ -21,12 +21,16 @@ def _html(title: str, detail: str) -> str:
 
 
 def create_app(
-    *, redirect_uri: str, store: TokenStore, exchange: Optional[Callable[[str], Any]] = None
+    *, redirect_uri: str, store: TokenStore, exchange: Optional[Callable[[str], Any]] = None,
+    reply_factory: Optional[Callable[[str, str], dict]] = None,
 ) -> Any:
     from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse
 
     _exchange = exchange or OAuthConsentFlow(redirect_uri).exchange
+    if reply_factory is None:
+        from aiia.handlers.reply_draft import make_reply_draft_factory
+        reply_factory = make_reply_draft_factory(store)
     app = FastAPI(title="AI-IA-UAE Connect")
 
     @app.get("/healthz")
@@ -39,5 +43,14 @@ def create_app(
     ) -> Any:
         r = process_callback(code=code, state=state, error=error, store=store, exchange=_exchange)
         return HTMLResponse(content=_html(r.title, r.detail), status_code=200 if r.ok else 400)
+
+    @app.get("/reply")
+    def reply(s: Optional[str] = None) -> Any:
+        """[対応する]url-button：署名検証→全返信下書き作成→Gmailの該当スレッド(#all)へ302。"""
+        r = process_reply(s=s, reply_factory=reply_factory)
+        if not r.ok or not r.thread_id:
+            return HTMLResponse(content=_html("開けませんでした", r.detail or "リンクが不正です"), status_code=400)
+        url = f"https://mail.google.com/mail/u/0/#all/{r.thread_id}"
+        return RedirectResponse(url=url, status_code=302)
 
     return app

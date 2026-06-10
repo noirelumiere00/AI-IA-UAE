@@ -51,3 +51,35 @@ def test_callback_exchange_failure_not_stored() -> None:
 
     r = process_callback(code="c", state=state, error=None, store=store, exchange=boom, state_secret=_S)
     assert not r.ok and not store.has("a@x.com")
+
+
+def test_process_reply_creates_draft_and_returns_thread() -> None:
+    from aiia.auth.oauth_flow import make_reply_token
+    from aiia.connect_web.callback import process_reply
+    calls: list = []
+
+    def factory(email: str, tid: str) -> dict:
+        calls.append((email, tid))
+        return {"draft_id": "d1"}
+
+    tok = make_reply_token("a@x.com", "thr9", secret=_S)
+    r = process_reply(s=tok, reply_factory=factory, state_secret=_S)
+    assert r.ok and r.thread_id == "thr9" and calls == [("a@x.com", "thr9")]
+
+
+def test_process_reply_bad_token_rejected() -> None:
+    from aiia.connect_web.callback import process_reply
+    r = process_reply(s="garbage!!", reply_factory=lambda e, t: {}, state_secret=_S)
+    assert not r.ok and r.thread_id is None
+
+
+def test_process_reply_draft_fail_still_redirects() -> None:
+    from aiia.auth.oauth_flow import make_reply_token
+    from aiia.connect_web.callback import process_reply
+
+    def factory(email: str, tid: str) -> dict:
+        raise RuntimeError("boom")
+
+    tok = make_reply_token("a@x.com", "thr9", secret=_S)
+    r = process_reply(s=tok, reply_factory=factory, state_secret=_S)
+    assert r.ok and r.thread_id == "thr9"  # fail-safe: 下書き失敗でも会話は開く

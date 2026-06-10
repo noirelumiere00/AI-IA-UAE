@@ -24,7 +24,7 @@ from aiia.delivery.slack import (
     ACTION_REMIND_UNDO,
     ACTION_SEND,
 )
-from aiia.mcp.workspace_gmail import WorkspaceGmail, WorkspaceGmailSender
+from aiia.mcp.workspace_gmail import WorkspaceGmailSender
 from aiia.runtime.slack_handlers import (
     HandlerDeps,
     handle_delete,
@@ -59,22 +59,9 @@ def build_handler_deps(
 
     import time
 
-    def reply_draft_factory(email: str, thread_id: str) -> dict:
-        """『対応する』：本人トークンでスレ取得→Haikuで返信生成→**返信下書きをGmailに作成**。"""
-        from aiia.config import load_platform, load_user
-        from aiia.providers.factory import build_llm
+    from aiia.handlers.reply_draft import make_reply_draft_factory
 
-        token = store.get(email)
-        if token is None:
-            raise PermissionError(f"{email} は未連携です（/connect）")
-        gmail = WorkspaceGmail(token)
-        thread = gmail.get_thread(thread_id)
-        llm = build_llm(load_platform())
-        summary = llm.summarize(thread)
-        draft = llm.draft(thread, summary, load_user(email))
-        info = gmail.create_reply_draft(
-            thread_id=thread_id, body=draft.body, thread=thread, user_email=email)  # 全返信(自分除外)
-        return {**info, "body": draft.body}
+    reply_draft_factory = make_reply_draft_factory(store)  # connect_web /reply と共通
 
     return HandlerDeps(
         store=store,
@@ -210,10 +197,14 @@ def create_app(deps: HandlerDeps, *, connect_redirect_uri: Optional[str] = None)
 
     @app.action(ACTION_REMIND_REPLY)
     async def on_remind_reply(ack: Any, body: Any, client: Any) -> None:
-        # 対応する＝下書きを作成し、Gmailの該当スレッド（下書き表示）へ飛ぶリンクを返す。
-        # 編集・送信はGmail側で行う（Slack内の編集/送信フローは廃止）。
+        # 対応する。url-button（value無し）の場合は connect-web /reply が下書き作成＋Gmailへ
+        # 自動リダイレクトを担うので、ここは ack のみ。value がある＝旧 action-button のフォールバック
+        # （下書き作成→リンク掲示）。
         await ack()
-        tid, uid = body["actions"][0]["value"], body["user"]["id"]
+        tid = body["actions"][0].get("value")
+        if not tid:
+            return  # url-button：/reply endpoint 側で完結
+        uid = body["user"]["id"]
         ch = body["channel"]["id"]
         ph = await client.chat_postMessage(channel=ch, text=f"<@{uid}> 返信下書きを作成しています…",
                                            unfurl_links=False, unfurl_media=False)

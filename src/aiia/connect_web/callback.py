@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from aiia.auth.oauth_flow import verify_state
+from aiia.auth.oauth_flow import verify_reply_token, verify_state
 from aiia.auth.token_store import OAuthToken, TokenStore
 
 
@@ -49,3 +49,33 @@ def process_callback(
     return CallbackResult(
         True, "✅ 連携が完了しました", f"{email} のGoogleを連携しました。このタブは閉じてOKです。", email
     )
+
+
+@dataclass
+class ReplyResult:
+    ok: bool
+    thread_id: Optional[str] = None
+    email: Optional[str] = None
+    detail: str = ""
+
+
+def process_reply(
+    *,
+    s: Optional[str],
+    reply_factory: Callable[[str, str], dict],
+    state_secret: Optional[bytes] = None,
+) -> ReplyResult:
+    """[対応する]url-button の `/reply?s=` を処理：署名検証→本人の全返信下書きを作成。
+    戻り値の thread_id でGmailへリダイレクトするのはWeb層。下書き作成失敗でも thread_id は返す
+    （会話だけは開く=fail-safe）。"""
+    if not s:
+        return ReplyResult(False, detail="s がありません")
+    parsed = verify_reply_token(s, secret=state_secret)
+    if parsed is None:
+        return ReplyResult(False, detail="署名が不正です（リンクを取り直してください）")
+    email, thread_id = parsed
+    try:
+        reply_factory(email, thread_id)  # 全返信HTML+署名の下書きを作成
+    except Exception as exc:  # noqa: BLE001 — 作成失敗でも会話は開く（リダイレクトは続行）
+        return ReplyResult(True, thread_id=thread_id, email=email, detail=f"draft_failed:{type(exc).__name__}")
+    return ReplyResult(True, thread_id=thread_id, email=email)

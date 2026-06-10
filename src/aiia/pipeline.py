@@ -98,13 +98,22 @@ def _compute_reminders(
         return []
     from aiia import reminder as _reminder
     try:
-        return _reminder.compute_reminders(
+        views = _reminder.compute_reminders(
             store, gmail=deps.tools.gmail, user_email=deps.user.user_id,
             today_items=items, threads_by_id={t.thread_id: t for t in threads},
             now=now, write=not deps.dry_run,
         )
     except Exception:  # noqa: BLE001 — リマインド失敗でメール本処理は止めない
         return []
+    # [対応する]を1クリック自動リダイレクトにする reply_url を付与（OAUTH_STATE_SECRET未設定なら
+    # 従来の action-button にフォールバック）。
+    from aiia.auth.oauth_flow import make_reply_url
+    for v in views:
+        try:
+            v.reply_url = make_reply_url(deps.user.user_id, v.thread_id)
+        except Exception:  # noqa: BLE001
+            pass
+    return views
 
 
 def _fetch_threads(deps: PipelineDeps) -> list[EmailThread]:
