@@ -33,7 +33,9 @@ def threshold_for(category_value: str) -> int:
 
 
 def gmail_link(thread_id: str) -> str:
-    return f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
+    # #all/ は会話をインラインで開き、下書きがあれば返信欄に本文＋署名がリッチ表示される
+    # （実測：#inbox/ はポップアップ、#all/ は会話インライン＝理想形で安定）。
+    return f"https://mail.google.com/mail/u/0/#all/{thread_id}"
 
 
 def is_unreplied(thread: EmailThread) -> bool:

@@ -231,7 +231,7 @@ def run(deps: PipelineDeps) -> AgentResult:
                     summary=summary,
                     classification=cls,
                     draft=draft,
-                    gmail_link=f"https://mail.google.com/mail/u/0/#inbox/{thread.thread_id}",
+                    gmail_link=f"https://mail.google.com/mail/u/0/#all/{thread.thread_id}",
                     gmail_draft_id=draft_id,
                     needs_review=cls.needs_review,
                 )
