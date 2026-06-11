@@ -135,6 +135,22 @@ def test_dismissed_record_not_shown() -> None:
     assert compute_slack_reminders(store, su, "me@x.com", _UID, _NOW) == []
 
 
+def test_same_channel_collapsed_to_one() -> None:
+    """同一channelの未返信メンション複数 → 代表1件＋「（ほかN件）」に集約。"""
+    store = InMemoryReminderStore()
+    m1 = _mention(ts=str(_NOW.timestamp() - 86400))
+    m2 = _mention(ts=str(_NOW.timestamp() - 2 * 86400), text=f"<@{_UID}> 2件目の依頼です")
+    for m in (m1, m2):
+        _seed_aged(store, f"slack:C1:{m['ts']}", biz_days_ago_from=_NOW)
+    su = FakeSlackUser(
+        [m1, m2],
+        replied={("C1", m1["thread_ts"]): False, ("C1", m2["thread_ts"]): False},
+    )
+    views = compute_slack_reminders(store, su, "me@x.com", _UID, _NOW, write=True)
+    assert len(views) == 1  # 1channel = 1行
+    assert "（ほか1件）" in views[0].subject
+
+
 def test_email_compute_skips_slack_keys() -> None:
     """email の compute_reminders が slack キーを gmail.get_thread に投げないこと。"""
     store = InMemoryReminderStore()

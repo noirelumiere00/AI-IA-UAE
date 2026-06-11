@@ -10,8 +10,8 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-# search.messages の「自分宛メンション」クエリ。Slack の検索演算子は API ドキュメントで保証されないため
-# bare token を第一候補とし、**実機検証後にここだけ差し替える**（定数化＝1箇所修正で済む）。
+# search.messages の「自分宛メンション」クエリ。**実機検証済み**（s-komataのxoxpで `<@{uid}>` が
+# 自分宛メンションを正しく返すことを確認・total多数ヒット）。定数化＝将来調整は1箇所で済む。
 MENTION_QUERY = "<@{uid}>"
 
 
@@ -66,26 +66,49 @@ class SlackUserClient:
     def has_user_replied_after(
         self, channel: str, thread_ts: str, slack_user_id: str, after_ts: str
     ) -> Optional[bool]:
-        """thread_ts のスレッドで after_ts より後に本人の発言があるか。
+        """メンション(after_ts)より後に、本人がそのチャンネル/スレッドで発言（=対応）したか。
 
-        判定不能（スコープ不足/権限/API失敗/不正ts）は **None**（呼び出し側で fail-closed＝催促しない）。
+        実データ上、営業チャンネルの返信はスレッド外（チャンネル直下）が多く、スレッドだけ見ると
+        「返信済みなのに未返信」と誤検知する。そこで **conversations.history（チャンネル直下）を主判定**に、
+        スレッド型は conversations.replies も併せて見て engagement を判定する。
+        - True  = after_ts 以降に本人の発言あり（対応済み → 催促しない）
+        - False = 取得できた上で本人の発言なし（真に未返信 → 催促候補）
+        - None  = channel/thread の両取得が不能（scope不足/権限/不正ts）→ fail-closed で催促しない
         """
-        try:
-            resp = self._wc().conversations_replies(channel=channel, ts=thread_ts, limit=200)
-        except Exception:  # noqa: BLE001 — missing_scope/not_in_channel 等は判定不能扱い
-            return None
-        if not resp.get("ok"):
-            return None
         try:
             after = float(after_ts)
         except (TypeError, ValueError):
             return None
-        for m in resp.get("messages", []) or []:
-            if m.get("user") != slack_user_id:
-                continue
-            try:
-                if float(m.get("ts", "0")) > after:
+
+        def _posted_after(messages: Any) -> bool:
+            for m in messages or []:
+                if m.get("user") != slack_user_id:
+                    continue
+                try:
+                    if float(m.get("ts", "0")) > after:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+            return False
+
+        checked = False
+        # 1) チャンネル直下：メンション以降に本人が何か投稿したか（非スレッド対応の主判定）
+        try:
+            h = self._wc().conversations_history(channel=channel, oldest=after_ts, limit=200)
+            if h.get("ok"):
+                checked = True
+                if _posted_after(h.get("messages")):
                     return True
-            except (TypeError, ValueError):
-                continue
-        return False
+        except Exception:  # noqa: BLE001 — missing_scope/not_in_channel 等は判定不能扱い
+            pass
+        # 2) スレッド型メンションは返信がスレッドに入るので併せて確認
+        if thread_ts and thread_ts != after_ts:
+            try:
+                r = self._wc().conversations_replies(channel=channel, ts=thread_ts, limit=200)
+                if r.get("ok"):
+                    checked = True
+                    if _posted_after(r.get("messages")):
+                        return True
+            except Exception:  # noqa: BLE001
+                pass
+        return False if checked else None

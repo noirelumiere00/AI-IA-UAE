@@ -300,5 +300,21 @@ def compute_slack_reminders(
                 message_ts=ts,
             )
         )
-    views.sort(key=lambda v: (-v.business_days, v.subject))
-    return views[:max_items]
+    # 同一channelは最も滞留の長い1件に集約（活発chでの行数爆発を防ぐ）。tracking は per-message のまま、
+    # 表示だけ代表1件＋「（ほかN件）」。dismiss/後で は代表メッセージに作用する。
+    reps: dict[str, ReminderView] = {}
+    extra: dict[str, int] = {}
+    for v in sorted(views, key=lambda v: -v.business_days):
+        ck = v.channel_id or v.thread_id
+        if ck in reps:
+            extra[ck] = extra.get(ck, 0) + 1
+        else:
+            reps[ck] = v
+    collapsed: list[ReminderView] = []
+    for ck, v in reps.items():
+        n = extra.get(ck, 0)
+        if n:
+            v.subject = f"{v.subject}（ほか{n}件）"
+        collapsed.append(v)
+    collapsed.sort(key=lambda v: (-v.business_days, v.subject))
+    return collapsed[:max_items]
