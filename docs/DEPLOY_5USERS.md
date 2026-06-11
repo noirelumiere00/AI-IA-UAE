@@ -8,11 +8,14 @@
 ## 全体像（公開が要るのは1つだけ）
 | 要素 | 公開要否 | 置き場 |
 |---|---|---|
-| **connect-web**（`/oauth2/callback`＋`/reply`） | 🌐 **公開HTTPS必須**（ブラウザが叩く） | トンネル or EC2 |
+| **connect-web**（`/oauth2/callback`＋`/reply`＋（任意）`/oauth2/slack/callback`） | 🌐 **公開HTTPS必須**（ブラウザが叩く） | トンネル or EC2 |
 | **serve**（Slackボタン応答・Socket Mode） | 不要（アウトバウンド接続） | 常駐できればどこでも |
 | **batch**（朝の配信） | 不要 | 定期実行できればどこでも |
 
 → **公開connect-webの立て方**で2案。まず動かすなら **A（トンネル）**、本番堅牢は **B（EC2）**。
+
+> **公開されるパス**：connect-web は `/oauth2/callback`（Google連携）と `/reply`（[対応する]）を常時公開。
+> **（任意）Slackユーザー認可**を使う場合は **`/oauth2/slack/callback`** も生えますが、これは **`SLACK_CLIENT_ID` と `AIIA_SLACK_TOKEN_TABLE` の両方が env にある時だけ**（出典 `connect_web/serve.py` / `app.py`）。env が空ならこのパスは生えず、メールのみで完結（＝段階導入）。
 
 ---
 
@@ -74,6 +77,23 @@ source .env.aila && ./scripts/aila.sh check     # https で ✓ になるか
   `https://<公開URL>/oauth2/callback` を**追加**して保存（既存の localhost は残してOK）。
   ※ **共通1リンク連携(STEP3 案C)を使うなら、この登録が必須**（未登録だと redirect_uri_mismatch）。
 
+### （任意・段階導入）Slackユーザー認可を足す場合
+メールだけなら以下は不要。**Slackの未返信メンションも合流させたい時だけ**設定します。
+```bash
+# .env.aila に Slack env 4種を追加（SLACK_CLIENT_ID を入れた時だけ Slack連携が有効）
+#   SLACK_CLIENT_ID=...                     # Slack App の OAuth クライアントID
+#   SLACK_CLIENT_SECRET=...                 # 同 シークレット（秘密・git禁止）
+#   SLACK_OAUTH_REDIRECT_URI=https://<公開URL>/oauth2/slack/callback
+#     ※未設定なら Google の OAUTH_REDIRECT_URI を流用（ただし /oauth2/slack/callback に向ける必要あり＝基本は明示）
+#   AIIA_SLACK_TOKEN_TABLE=aiia-slack-tokens   # xoxp保管テーブル（既定 aiia-slack-tokens）
+source .env.aila && ./scripts/aila.sh check
+```
+- **Slack App 側（GCPとは別の管理画面）**：[api.slack.com/apps](https://api.slack.com/apps) → 対象App → **OAuth & Permissions** →
+  「Redirect URLs」に **`https://<公開URL>/oauth2/slack/callback`** を**追加**して保存。
+  ※ これは **GoogleのGCP（前項）とは別物**。Slackの認可は Slack App 管理画面、Googleの認可は GCP、で分けて登録する。
+  ※ User Token Scopes（`search:read` `channels:history` `groups:history` `mpim:history`）追加＋**App再インストール**は ONBOARDING.md の前提を参照。
+- **env 追加後は connect-web を再起動**（`/oauth2/slack/callback` を生やすため）：`./scripts/aila.sh down && ./scripts/aila.sh up`（EC2なら `sudo systemctl restart aila-connect`）。
+
 ---
 
 ## STEP 3: 5名を連携する（🧑‍💼＋🤖）― 3案。**おすすめは案C（共通1リンク）**
@@ -81,12 +101,15 @@ source .env.aila && ./scripts/aila.sh check     # https で ✓ になるか
 1本のURLを発行し、Slackのチームチャンネル/DMに貼るだけ。各人がタップ→自分のGoogleで「許可」→完了。
 誰が踏んでも**自分のメール専用**に連携される（本人は Google ログイン結果=id_token で確定）。
 ```bash
-source .env.aila && ./scripts/aila.sh connect-url   # 共通1リンク(URL1行)を出力
+source .env.aila && ./scripts/aila.sh connect-url        # Google用 共通1リンク(URL1行)を出力
 #  → このURLをSlackに貼る。各人タップ→「許可」→「✅ 連携が完了しました」。
-./scripts/aila.sh smoke                             # 連携済みに人数が増えるのを確認
+./scripts/aila.sh connect-url-slack                      # （任意）Slack用 共通1リンク(2本目)を出力
+#  → 同じくSlackに貼る。各人タップ→自分のSlackを「許可」→Slackの未返信メンションも合流。
+./scripts/aila.sh smoke                                  # 連携済みに人数が増えるのを確認
 ```
+- **配布は最大2本**：Google用 `connect-url`（必須）と Slack用 `connect-url-slack`（**任意**）。各人がGoogle＋Slackの**2リンクをタップ**。Slackは足さなくてもメールのみで完結（`SLACK_CLIENT_ID` 等の env を入れた時だけ Slack用リンクが発行される）。
 - **安全**：`AIIA_CONNECT_ALLOWED_DOMAINS`（or `AIIA_DEFAULT_INTERNAL_DOMAIN`）で**社用ドメイン以外は自動で弾く**。
-- **前提**：STEP2 の GCP redirect_uri 登録が必須（公開URLの `/oauth2/callback`）。
+- **前提**：STEP2 の GCP redirect_uri 登録が必須（公開URLの `/oauth2/callback`）。Slack用を使うなら Slack App の Redirect URLs に `/oauth2/slack/callback` 登録も必須。
 - URLは公開URL（redirect_uri）に紐づく＝**公開先を変えたら再発行**。
 
 ### 案A：既にTeamAgentで連携済み → 移行（誰のクリックも不要・一瞬）
@@ -123,16 +146,19 @@ export DATABASE_URL='postgresql://...teamagent...'   # SSM踏み台等でRDS到�
 1. 5名の Slack DM に「📬 メールサマリー」が届く
 2. 🔔未返信の **[対応する]** を押す → ブラウザが開き、Gmailの該当スレッドに **本文＋署名入りの全返信下書き**がインラインで開く（1クリック）
 3. **[対応済み][後で]** が反応（serve常駐の確認）
+4. **（Slack連携を足した場合のみ）** Slackメンションの未返信が **`【メンション】`** 行で朝サマリーに届く（例：`【メンション】〔#ch〕 *@相手* 抜粋 — N営業日未返信`）／その行の **[対応する]** でSlackの該当メッセージへ飛ぶ
 
 ---
 
 ## チェックリスト
+- [ ] **AWS事前作成**：DynamoDB `aiia-oauth-tokens` / `aiia-reminder-state`（／Slack連携を足すなら **`aiia-slack-tokens`**：PK=`user_email`・xoxpをKMS暗号化＝`OAUTH_KMS_KEY_ID`流用）
 - [ ] connect-web 公開（A or B）→ `https://.../healthz` が `{"ok":true}`
 - [ ] OAUTH_REDIRECT_URI / CONNECT_BASE_URL を公開URLに（check ✓）
 - [ ] GCP pgd1 に公開 redirect_uri 追加
 - [ ] 5名 connected（smoke で5名）
 - [ ] serve 常駐 ／ batch（初回配信OK・定期化）
 - [ ] [対応する]1クリック動作 ／ [対応済み]反応
+- [ ] **（任意・Slack連携）** Slack env 4種 ／ Slack App の Redirect URLs に `/oauth2/slack/callback` ／ `connect-url-slack` 配布 ／ 検証：未返信メンションが `【メンション】` で届き [対応する] で該当メッセージへ飛ぶ
 
 ## 補足
 - **安全**：AWS secret読み書き・SSM・EC2構築・GCP変更は🧑‍💼。私(🤖)はスクリプト/systemd/Caddy/runbookまで。

@@ -5,10 +5,21 @@
 営業に AiLa を配る＝**各人が自分のGoogleを一度連携する**だけ。まず **上位レイヤー5名で先行**、問題なければ拡大、が安全。
 
 ## 0. 前提（一度だけ・構築済み）
-- Slack アプリ **AiLa**（Socket Mode・`/connect`・Bot Token）→ `.env.aila` に設定済。
+- Slack アプリ **AiLa**（Socket Mode・`/connect`・Bot Token、bot側 `users:read.email`）→ `.env.aila` に設定済。
 - AWS（ap-northeast-1）：DynamoDB `aiia-oauth-tokens` / `aiia-reminder-state`、KMS、Bedrock（Haiku）→ 構築済。
 - Google OAuth：**pgd1（TeamAgent Connect・web型）クライアントを流用**。
 - ローカル：`cd ~/Documents/AI-IA-UAE && uv pip install -e '.[multiuser,bedrock]'`、`source .env.aila`、`./scripts/aila.sh check` が ✅。
+
+### （任意・段階導入）Slackユーザー認可＝未返信メンション連携を足す場合
+メールだけでも本ツールは完結します。**Slackの未返信メンションも朝サマリーに合流させたい時だけ**、以下を追加で用意します（足さなければ Slack連携は生えず、メールのみで動きます）。
+- **Slack App の User Token Scopes 追加**：`search:read` `channels:history` `groups:history` `mpim:history`（出典 `src/aiia/auth/slack_oauth.py` の `DEFAULT_USER_SCOPES`。各人の未返信メンションを**読取専用・本人メンションのみ**で検知。投稿はしない）。bot側 `users:read.email` は既存のまま。
+  - ⚠️ **scope を追加したら App を再インストール**（User Token Scopes の変更は再インストールしないと反映されない）。
+- **DynamoDB `aiia-slack-tokens` を作成**：PK=`user_email`。各人の xoxp（user token）を **KMS暗号化**して保管（鍵は既存の `OAUTH_KMS_KEY_ID` を流用）。Google用 `aiia-oauth-tokens` とは別テーブル。
+- **新規 env（Slack連携を有効化する時だけ）**：
+  - `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`：Slack App の OAuth クライアント。
+  - `SLACK_OAUTH_REDIRECT_URI`：Slackユーザー認可のコールバック（未設定なら Google の `OAUTH_REDIRECT_URI` を流用）。
+  - `AIIA_SLACK_TOKEN_TABLE`：xoxp保管テーブル名（既定 `aiia-slack-tokens`）。
+  - 注記：**`SLACK_CLIENT_ID` を入れた時だけ Slack連携が有効＝完全な段階導入**。空のままなら Slackの認可URL/コールバックは生えず、メールのみで動作。
 
 ## 1. 5名の登録（2通り・どちらか）
 
@@ -28,6 +39,7 @@ export DATABASE_URL='postgresql://...@teamagent-dev...:5432/teamagent?sslmode=re
   - 小規模なら一時的に：構築者が `./scripts/aila.sh connect-web` を立て、対象者を**画面共有/その場**で連携。
   - 本番は **小型の公開エンドポイント（Fargate or Lambda+API Gateway）** に connect-web を置き、その `https://.../oauth2/callback` を **GCP pgd1 のリダイレクトURIに追加** → 各自どこからでも `/connect` 可能。
 - 管理者が一括でリンクを配る場合：`./scripts/aila.sh connect-link <email1> <email2> …`（生成したURLを本人に送る）。
+- **（任意）Slack連携も配る場合**：Google用の `connect-url` に加えて **`./scripts/aila.sh connect-url-slack`** で**2本目の共通リンク**を発行し、同じく Slackに貼る（出典 `scripts/aila.sh`）。各人が Google＋Slack の2リンクをタップ＝Slackの未返信メンションも朝サマリーに合流。Slackは**任意**（足さなければメールのみで完結）。`SLACK_CLIENT_ID` 等の env を入れていない場合はこのリンクは発行されません。
 
 > **おすすめ**：5名がTeamAgent連携済みなら **A（移行）が一瞬**。未済が混ざるなら **B（公開connect-web）** をタスクとして用意。
 

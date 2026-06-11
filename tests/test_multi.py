@@ -149,8 +149,11 @@ def test_run_for_all_users_merges_slack_mentions_only_for_authorized() -> None:
         slack_user_factory=lambda tok: FakeSU(),
     )
     assert all(r.ok for r in res)
-    assert "メンション" in str(wc.blocks.get("D_U_alice@x.com", []))  # 認可者はメンション合流
-    assert "メンション" not in str(wc.blocks.get("D_U_bob@x.com", []))  # 未認可者はskip
+    by = {r.email: r for r in res}
+    assert by["alice@x.com"].delivered is True  # 認可者へ配信成功
+    # 描画された配信blocksに【メンション】ラベル＝Slack分が合流して render された証拠
+    assert "【メンション】" in str(wc.blocks.get("D_U_alice@x.com", []))  # 認可者はメンション合流
+    assert "【メンション】" not in str(wc.blocks.get("D_U_bob@x.com", []))  # 未認可者はskip
 
 
 def test_run_for_all_users_no_slack_store_unchanged() -> None:
@@ -169,7 +172,7 @@ def test_run_for_all_users_no_slack_store_unchanged() -> None:
         gmail_service_factory=factory,
     )
     assert res[0].ok and res[0].delivered  # slack_token_store未指定でも従来どおり配信
-    assert "メンション" not in str(wc.blocks.get("D_U_alice@x.com", []))
+    assert "【メンション】" not in str(wc.blocks.get("D_U_alice@x.com", []))  # Slack分は混入しない
 
 
 def test_run_for_all_users_isolates_one_failure() -> None:
