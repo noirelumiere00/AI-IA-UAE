@@ -175,6 +175,24 @@ def test_run_for_all_users_no_slack_store_unchanged() -> None:
     assert "【メンション】" not in str(wc.blocks.get("D_U_alice@x.com", []))  # Slack分は混入しない
 
 
+def test_run_for_all_users_require_slack_gates_unlinked() -> None:
+    # §V: require_slack=True は Google+Slack 両連携済みのみ配信（Slack OAuth未連携はスキップ）。
+    store = InMemoryTokenStore({"alice@x.com": OAuthToken("1//a"), "bob@x.com": OAuthToken("1//b")})
+    slack_store = InMemoryTokenStore({"alice@x.com": OAuthToken("xoxp-a")})  # alice だけSlack連携済み
+    wc = _CapWC()
+
+    def factory(email: str) -> Any:
+        return FakeGmailService(_thread_get())
+
+    res = run_for_all_users(
+        store=store, platform=_plat(), config_dir=CONFIG_DIR,
+        slack=SlackDelivery(client=wc), dry_run=False, gmail_service_factory=factory,
+        slack_token_store=slack_store, require_slack=True,
+    )
+    assert [r.email for r in res] == ["alice@x.com"]  # bob はSlack未連携でスキップ
+    assert "D_U_bob@x.com" not in wc.blocks  # bob には配信されない
+
+
 def test_run_for_all_users_isolates_one_failure() -> None:
     store = InMemoryTokenStore({"alice@x.com": OAuthToken("1//a"), "bob@x.com": OAuthToken("1//b")})
 

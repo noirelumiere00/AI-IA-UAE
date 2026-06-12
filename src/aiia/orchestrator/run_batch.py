@@ -18,15 +18,18 @@ def main() -> None:
     store = DynamoDbTokenStore(os.environ["AIIA_DDB_TABLE"], cipher)
     rstore = DynamoDbReminderStore(os.environ.get("AIIA_REMINDER_TABLE", "aiia-reminder-state"))
 
+    # §V: Slack OAuth(xoxp) 保管表。両連携必須ゲート＋（指定時）未返信メンション検知に使う。
     slack_token_store = None
     slack_table = os.environ.get("AIIA_SLACK_TOKEN_TABLE")
-    if os.environ.get("SLACK_CLIENT_ID") and slack_table:
+    if slack_table:
         slack_token_store = DynamoDbTokenStore(slack_table, cipher)
 
     for r in run_for_all_users(
         store=store,
         slack=SlackDelivery(),
-        dry_run=False,
+        dry_run=False,  # 配信＋ラベル付けは行う
+        create_drafts=False,  # §V: 朝ダイジェストは配信only。下書きは[対応する]押下時にon-demand作成
+        require_slack=slack_token_store is not None,  # §V: Slackトークン表があれば Google+Slack 両連携必須
         max_budget_usd=1.0,
         reminder_store=rstore,
         slack_token_store=slack_token_store,

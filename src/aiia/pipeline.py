@@ -55,6 +55,10 @@ class PipelineDeps:
     agent: MorningEmailConfig
     audit: Optional[AuditLog] = None
     dry_run: bool = True
+    # §V: 下書きの Gmail 保存を抑制（プレビューは作るが create_draft しない）。
+    # 朝バッチ=配信only（create_drafts=False）にして Gmail に大量下書きを作らず、
+    # 下書きは [対応する] 押下時に on-demand 作成（/reply）。dry_run とは独立。
+    create_drafts: bool = True
     now: Optional[datetime] = None  # テスト決定性用（未指定なら現在時刻）
     # M3: 文体プロファイル(本人)・関連Slack文脈(スレッド毎)。未指定なら従来どおり素のdraft。
     style_provider: Optional[Callable[[UserConfig], Optional[str]]] = None
@@ -212,7 +216,7 @@ def run(deps: PipelineDeps) -> AgentResult:
                     d = d.model_copy(update={"body": redact(d.body)})
                     redactions += len(secrets)
                 draft = d
-                if not deps.dry_run:
+                if not deps.dry_run and deps.create_drafts:
                     draft_id = deps.tools.gmail.create_draft(
                         thread_id=thread.thread_id, subject=d.subject, body=d.body
                     )

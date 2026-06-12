@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from conftest import FIXED_NOW
 
@@ -32,6 +33,19 @@ def test_live_records_drafts_labels_no_send(
     assert res.drafts_created == 2
     assert res.labels_applied == len(res.digest.items)  # 表示した項目だけラベル付与
     assert res.digest.quiet_counts  # 一般メールは件数に畳まれている
+
+
+def test_create_drafts_false_delivers_preview_but_no_gmail_draft(
+    make_deps: Callable[..., PipelineDeps], tools: FakeMCPToolset
+) -> None:
+    # §V: dry_run=False でも create_drafts=False なら Gmail に下書きを作らない（朝ダイジェスト=配信only）。
+    # プレビューは digest 内に残り、実下書きは [対応する] 押下時に on-demand 作成（/reply）。
+    res = run(replace(make_deps(tools, dry_run=False), create_drafts=False))
+    kinds = [c[0] for c in tools.calls]
+    assert "create_draft" not in kinds  # Gmail下書きは作らない
+    assert res.drafts_created == 0
+    assert "label_thread" in kinds  # ラベルは付く（dry_run=False）
+    assert any(it.draft for it in res.digest.items)  # プレビューは残る
 
 
 def test_existing_draft_is_skipped(

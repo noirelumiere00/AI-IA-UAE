@@ -55,10 +55,15 @@ def run_for_all_users(
     slack_user_factory: Optional[
         Callable[[str], Any]
     ] = None,  # テスト用に SlackUserClient(xoxp) を注入
+    create_drafts: bool = True,  # §V: 配信only（朝バッチ）は False＝Gmailに下書きを作らない
+    require_slack: bool = False,  # §V: True＝Google+Slack 両連携済みのみ active（slack_token_store必須）
 ) -> list[UserResult]:
     platform = platform or load_platform(config_dir)
     agent = load_agent_config("morning_email", config_dir)
+    # §V: 両連携必須ゲート。Slack OAuth(xoxp) 未連携ユーザーは対象外（require_slack時）。
     emails = store.list_emails()
+    if require_slack and slack_token_store is not None:
+        emails = [e for e in emails if slack_token_store.has(e)]
     style_cache: dict[str, str] = {}  # run 内で per-user 文体を1回だけ構築
 
     def _one(email: str) -> UserResult:
@@ -113,6 +118,7 @@ def run_for_all_users(
                     agent=agent,
                     audit=AuditLog(email),
                     dry_run=dry_run,
+                    create_drafts=create_drafts,
                     style_provider=style_provider,
                     grounding_provider=grounding_provider,
                     max_budget_usd=max_budget_usd,
