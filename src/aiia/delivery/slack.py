@@ -241,25 +241,64 @@ def _subject_link(it: DigestItem) -> str:
 
 
 def _item_badges(it: DigestItem) -> str:
-    """行動を分けるシグナルだけ行頭バッジ化（締切→要確認の順）。下書きは補助に降格。"""
+    """行動を分けるシグナルだけ行頭バッジ化（締切→要確認→金額→担当）。下書きは補助に降格。"""
     b = []
     if _has_deadline(it):
         b.append("`締切`")
     if it.needs_review:
         b.append("`要確認`")
+    amt = getattr(it.classification, "amount_jpy", None)
+    if amt:  # §W: 金額バッジ（万/億で簡潔に）
+        b.append(f"`¥{_yen_short(amt)}`")
+    kp = getattr(it.classification, "key_person", None)
+    if kp:  # §W: キーパーソン
+        b.append(f"`👤{kp[:12]}`")
     return "".join(x + " " for x in b)
 
 
+def _yen_short(n: int) -> str:
+    """金額を簡潔表示：1.2億 / 350万 / 5,000。"""
+    if n >= 100_000_000:
+        return f"{n / 100_000_000:.1f}".rstrip("0").rstrip(".") + "億"
+    if n >= 10_000:
+        return f"{n // 10_000}万"
+    return f"{n:,}"
+
+
+def _action_lines(it: DigestItem) -> list[str]:
+    """§W: ThreadSummary.action_items を「やること/質問/締切」サブ行に（最大3件）。"""
+    icon = {"action": "✅", "question": "❓", "deadline": "⏰"}
+    out: list[str] = []
+    for a in (it.summary.action_items or [])[:3]:
+        t = (a.text or "").replace("\n", " ").strip()
+        if not t:
+            continue
+        extra = ""
+        if a.kind == "deadline" and a.deadline:
+            extra = f"（{a.deadline.astimezone(_JST).strftime('%-m/%-d')}）"
+        out.append(f"{icon.get(a.kind, '・')} {t[:80]}{extra}")
+    return out
+
+
 def _item_text(it: DigestItem) -> str:
-    """要対応メール：行頭バッジ(締切/要確認) → 〔カテゴリ〕 → *相手* → 件名(link) / 補助行(下書き・要約)。"""
+    """要対応メール：行頭バッジ → 〔カテゴリ〕 → *相手* → 件名(link)
+    → 要約 → やること箇条 → アクション導線(✏️返信を作成 ｜ 📧Gmail)。"""
     cat = _CAT_LABEL.get(it.category, it.category.value)
-    head = f"{_item_badges(it)}〔{cat}〕 *{_short_sender(it.sender)}*　{_subject_link(it)}"
-    sub = []
-    if it.draft:
-        sub.append("下書き準備済み")
+    lines = [f"{_item_badges(it)}〔{cat}〕 *{_short_sender(it.sender)}*　{_subject_link(it)}"]
     if it.summary.one_liner:
-        sub.append(it.summary.one_liner)
-    return head + (f"\n_{' ・ '.join(sub)}_" if sub else "")
+        lines.append(f"_{it.summary.one_liner}_")
+    lines.extend(_action_lines(it))  # §W: やること/質問/締切
+    # §W: アクション導線（markdown リンク＝interaction0で単一アプリ安全）。
+    actions = []
+    if getattr(it, "reply_url", None):
+        actions.append(f"<{it.reply_url}|✏️ 返信を作成>")
+    if it.gmail_link:
+        actions.append(f"<{it.gmail_link}|📧 Gmailで開く>")
+    if it.draft:
+        actions.append("下書き準備済み")
+    if actions:
+        lines.append("　".join(actions))
+    return "\n".join(lines)
 
 
 def _sorted(items: list[DigestItem]) -> list[DigestItem]:

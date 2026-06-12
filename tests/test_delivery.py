@@ -123,3 +123,26 @@ def test_reminder_line_uses_markdown_reply_link_for_single_app() -> None:
     # reply_url 無し＝リンクを出さない（壊れたリンクを置かない）
     v2 = ReminderView(thread_id="t2", category=Category.CLIENT_NORMAL, subject="x", sender="y")
     assert "対応する" not in _reminder_line(v2)
+
+
+def test_item_text_includes_reply_and_gmail_links() -> None:
+    # §W: 要対応メール各件に「✏️返信を作成」(reply_url) と「📧Gmailで開く」(gmail_link) が出る。
+    from aiia.delivery.slack import _item_text
+    from aiia.schemas import Category, ClassificationResult, DigestItem, ThreadSummary
+
+    it = DigestItem(
+        thread_id="t1", category=Category.CLIENT_NORMAL, priority=1,
+        subject="見積の件", sender="田中 <tanaka@x.co>",
+        summary=ThreadSummary(thread_id="t1", one_liner="見積を今日中に"),
+        classification=ClassificationResult(category=Category.CLIENT_NORMAL, amount_jpy=3_500_000, key_person="江畑"),
+        gmail_link="https://mail.google.com/mail/u/0/#all/t1",
+        reply_url="https://aila.example/reply?s=sig",
+    )
+    txt = _item_text(it)
+    assert "<https://aila.example/reply?s=sig|" in txt and "返信を作成" in txt
+    assert "📧 Gmail" in txt and "#all/t1" in txt
+    assert "350万" in txt and "江畑" in txt  # 金額・担当バッジ
+    # reply_url 無し＝返信リンクは出さない
+    it2 = DigestItem(thread_id="t2", category=Category.CLIENT_NORMAL, priority=1, subject="x", sender="y",
+                     summary=ThreadSummary(thread_id="t2"), classification=ClassificationResult(category=Category.CLIENT_NORMAL))
+    assert "返信を作成" not in _item_text(it2)

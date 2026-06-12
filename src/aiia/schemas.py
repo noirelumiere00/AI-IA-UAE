@@ -164,6 +164,9 @@ class DigestItem(BaseModel):
     gmail_draft_id: Optional[str] = (
         None  # 非dry_runで作成したGmail下書きID（M2ボタンが編集/削除/送信に使う）
     )
+    # §W: [✏️返信を作成] url-button 用（/reply?s=署名）。pipeline が make_reply_url で付与。
+    # remindersだけでなく要対応メール各件にも返信導線を出すため。未設定なら導線を出さない。
+    reply_url: Optional[str] = None
     needs_review: bool = False
 
 

@@ -255,6 +255,14 @@ def run(deps: PipelineDeps) -> AgentResult:
             items.append(_failed_item(thread))
 
     items.sort(key=lambda it: it.priority)
+    # §W: 各要対応メールに [✏️返信を作成] reply_url を付与（remindersと同パターン）。
+    # OAUTH_STATE_SECRET 未設定なら例外→付かない＝導線非表示（壊れたリンクを置かない）。
+    from aiia.auth.oauth_flow import make_reply_url
+    for _it in items:
+        try:
+            _it.reply_url = make_reply_url(deps.user.user_id, _it.thread_id)
+        except Exception:  # noqa: BLE001
+            pass
     reminders = _compute_reminders(deps, items, threads, now)
     digest = Digest(
         generated_at=now,
