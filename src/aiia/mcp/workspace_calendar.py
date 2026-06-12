@@ -107,3 +107,18 @@ class WorkspaceCalendar:
                 continue
             out.append(ce)
         return out
+
+    def list_upcoming_events(
+        self, now: Optional[datetime] = None, *, lead_minutes: int = 5
+    ) -> list[CalendarEvent]:
+        """開始が [now, now+lead_minutes] に入る予定（=もうすぐ始まる）。
+        終日・declined は list_today_events 準拠で除外。5分前メンション通知に使う。"""
+        n = (now or datetime.now(JST)).astimezone(JST)
+        out: list[CalendarEvent] = []
+        for ev in self.list_today_events(n):
+            if ev.all_day or ev.start is None:
+                continue
+            mins = (ev.start.astimezone(JST) - n).total_seconds() / 60.0
+            if 0 <= mins <= lead_minutes:  # 過ぎた予定(<0)は通知しない
+                out.append(ev)
+        return out

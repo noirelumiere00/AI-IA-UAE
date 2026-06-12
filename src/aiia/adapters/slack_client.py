@@ -73,3 +73,18 @@ class SlackDelivery:
             unfurl_links=False, unfurl_media=False,  # GmailリンクのプレビューカードをOFF
         )
         return bool(resp.get("ok"))
+
+    def send_mention(self, *, email: str, text: str) -> bool:
+        """本人DMへ @メンション付き即時通知（カレンダー5分前など）。
+        email→user_id→DM→postMessage。DM自体が通知を飛ばし、先頭 `<@uid>` で本人を名指し。"""
+        uid = self.user_id_for_email(email)
+        if not uid:
+            return False
+        channel = self.open_dm(uid)
+        if not channel:
+            return False
+        resp = self._wc().chat_postMessage(
+            channel=channel, text=f"<@{uid}> {text}",
+            unfurl_links=False, unfurl_media=False,
+        )
+        return bool(resp.get("ok"))
