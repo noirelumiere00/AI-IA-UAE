@@ -31,7 +31,8 @@ multiuser = [
 # §Q aiia-mcp: AiLaのメール機能を streamable-http MCP サーバとして公開（OpenClaw配下バックエンド）。
 # teamagent run_mcp_http_server パターン流用。per-user resolver(slack_user_id→email)内蔵・bearer。
 aiia_mcp = [
-  "mcp>=1.0",
+  # streamable_http_manager は mcp 1.8.0 で追加（run_mcp_http_server.py が必須要求）＝下限を実最低版に。
+  "mcp>=1.8",
   "starlette>=0.37",
   "uvicorn>=0.29",
   "boto3>=1.34",

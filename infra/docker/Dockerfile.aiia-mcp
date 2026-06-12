@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# aiia-mcp — AiLaメール境界（streamable-http MCP・bearer） — ECS Fargate(arm64)
+# ============================================================
+# 役割(§Q): OpenClaw外殻から MCP(streamable-http/bearer) でしか触れない「信頼境界の内側」。
+#   per-user Google token(DynamoDB+KMS)・Gmail・Bedrock に触れるのはこのコンテナだけ。
+#   scripts/run_mcp_http_server.py を起動（AIIA_MCP_BEARER 未注入なら起動拒否=fail-closed）。
+#   本人解決は slack_user_id→users.info のサーバ側STRICT（外殻申告emailは不採用）。
+# 秘密値は焼かない（ECS task の secrets valueFrom で注入）:
+#   AIIA_MCP_BEARER / SLACK_BOT_TOKEN / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / OAUTH_STATE_SECRET
+#
+# build (CodeBuild: teamagent-dev-aiia-image-builder・AWS内=社内proxy回避):
+#   source zip は AI-IA-UAE repo root から（pyproject.toml / src / config / scripts / infra/docker）:
+#     cd ~/Documents/AI-IA-UAE && zip -r /tmp/aiia-source.zip pyproject.toml src config scripts infra/docker
+#     aws s3 cp /tmp/aiia-source.zip s3://teamagent-dev-raw-files/codebuild/aiia-source.zip
+#     aws codebuild start-build --project-name teamagent-dev-aiia-image-builder
+#   ローカル検証: docker build -f infra/docker/Dockerfile.aiia-mcp -t aiia-mcp:local .
+#
+# 依存は全て pure-python wheel（torch/E5 無し）＝teamagent-mcp より大幅に軽量。
+# uv.lock が無い repo のため pip で解決（ビルドは AWS 内で決定的に走る）。
+# ============================================================
+
+FROM public.ecr.aws/docker/library/python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+# curl は ECS healthCheck 用
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 依存＋本体（aiia_mcp=mcp/starlette/uvicorn/boto3/google/slack/structlog・
+# bedrock=anthropic[bedrock]。AIIA_PROFILE=bedrock の実走に両方必須）
+COPY pyproject.toml ./
+COPY src/ ./src/
+RUN pip install ".[aiia_mcp,bedrock]"
+
+# 設定とエントリポイント（.env / token / secrets は絶対に含めない）
+COPY config/ ./config/
+COPY scripts/run_mcp_http_server.py ./scripts/run_mcp_http_server.py
+
+# 非root（teamagent-mcp と同方針）
+RUN useradd -m -u 10001 aiia
+USER aiia
+
+# AIIA_PROFILE=bedrock + STRICT（Bedrock初期化失敗時に黙ってHeuristicへ落ちない）。
+# OAUTH_STATE_SECRET 未注入時は reply_url が付かないだけ（graceful・aiia実装仕様）。
+ENV AIIA_MCP_HOST=0.0.0.0 \
+    AIIA_MCP_PORT=8788 \
+    AIIA_MCP_PATH=/mcp \
+    AIIA_CONFIG_DIR=/app/config \
+    AIIA_PROFILE=bedrock \
+    AIIA_STRICT_PROVIDER=1 \
+    AWS_REGION=ap-northeast-1
+EXPOSE 8788
+
+# /healthz は bearer 不要（run_mcp_http_server.py）
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 --start-period=30s \
+  CMD curl -fsS "http://127.0.0.1:8788/healthz" || exit 1
+
+CMD ["python", "scripts/run_mcp_http_server.py"]
