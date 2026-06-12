@@ -28,6 +28,17 @@ multiuser = [
   "fastapi>=0.110",
   "uvicorn>=0.29",
 ]
+# connect_web を AWS Lambda + Function URL で公開する最小依存（§V6改・ngrok/ドメイン不要）。
+# OAuthコールバック(/oauth2/*)＋/reply(全返信下書き)を1 Lambdaが捌く。uvicorn/slack_bolt/anthropic は不要。
+# boto3 は Lambda ランタイム同梱のため除外（パッケージ削減）。
+lambda = [
+  "mangum>=0.17",
+  "fastapi>=0.110",
+  "google-auth>=2.0",
+  "google-auth-oauthlib>=1.0",
+  "google-api-python-client>=2.0",
+  "slack_sdk>=3.27",
+]
 dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10", "types-PyYAML"]
 
 [project.scripts]
