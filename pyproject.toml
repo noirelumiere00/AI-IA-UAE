@@ -28,6 +28,18 @@ multiuser = [
   "fastapi>=0.110",
   "uvicorn>=0.29",
 ]
+# §Q aiia-mcp: AiLaのメール機能を streamable-http MCP サーバとして公開（OpenClaw配下バックエンド）。
+# teamagent run_mcp_http_server パターン流用。per-user resolver(slack_user_id→email)内蔵・bearer。
+aiia_mcp = [
+  "mcp>=1.0",
+  "starlette>=0.37",
+  "uvicorn>=0.29",
+  "boto3>=1.34",
+  "google-api-python-client>=2.0",
+  "google-auth>=2.0",
+  "slack_sdk>=3.27",
+  "structlog>=24.0",
+]
 # connect_web を AWS Lambda + Function URL で公開する最小依存（§V6改・ngrok/ドメイン不要）。
 # OAuthコールバック(/oauth2/*)＋/reply(全返信下書き)を1 Lambdaが捌く。uvicorn/slack_bolt/anthropic は不要。
 # boto3 は Lambda ランタイム同梱のため除外（パッケージ削減）。
