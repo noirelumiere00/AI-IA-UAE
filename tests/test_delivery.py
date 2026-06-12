@@ -83,7 +83,7 @@ def test_to_shown_and_cc_excluded() -> None:
     d = Digest(generated_at=datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc), user_id="t",
                items=[_ditem("to"), _ditem("cc"), _ditem("cc")])
     txt = render_digest_text(d)
-    assert "要対応メール（1）" in txt  # Toの1件だけ
+    assert "要対応メール（1件）" in txt  # Toの1件だけ
     assert "CC" not in txt and "参考" not in txt  # Cc件数行は出さない
 
 
@@ -94,7 +94,7 @@ def test_to_top5_fold_within_limit() -> None:
     blocks = render_slack_blocks(d, interactive=True)
     assert len(blocks) <= 49
     assert any("要対応メール" in str(b) for b in blocks)   # To見出しは残る
-    assert any("省略" in str(b) for b in blocks)          # Top5超は省略表記
+    assert any("ほか" in str(b) for b in blocks)          # Top5超は「ほかN件はGmailで確認」に畳む
 
 
 def test_reminder_actions_url_button_vs_action() -> None:
