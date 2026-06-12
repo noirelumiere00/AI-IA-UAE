@@ -6,18 +6,24 @@
 
 from __future__ import annotations
 
+import html
 from typing import Any, Callable, Optional
 
 from aiia.auth.oauth_flow import OAuthConsentFlow
 from aiia.auth.token_store import TokenStore
 from aiia.connect_web.callback import process_callback, process_reply
 
+# インライン style 属性を使うため style-src のみ許可。それ以外（script等）は全面拒否＝XSS多層防御。
+_CSP = "default-src 'none'; style-src 'unsafe-inline'"
+
 
 def _html(title: str, detail: str) -> str:
+    # 出口で必ず html.escape（反射型XSS対策）。呼び出し側は常にプレーンテキストを渡す契約。
     return (
         "<html><head><meta charset='utf-8'></head>"
         "<body style='font-family:sans-serif;max-width:560px;margin:48px auto;text-align:center'>"
-        f"<h2>{title}</h2><p style='color:#555'>{detail}</p></body></html>"
+        f"<h2>{html.escape(title)}</h2>"
+        f"<p style='color:#555'>{html.escape(detail)}</p></body></html>"
     )
 
 
@@ -45,6 +51,14 @@ def create_app(
 
         slack_exchange = SlackOAuthConsentFlow(slack_redirect_uri or redirect_uri).exchange
     app = FastAPI(title="AI-IA-UAE Connect")
+
+    @app.middleware("http")
+    async def _security_headers(request: Any, call_next: Callable[[Any], Any]) -> Any:
+        """全レスポンスに最小のセキュリティヘッダを一括付与。"""
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = _CSP
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @app.get("/healthz")
     def healthz() -> dict:

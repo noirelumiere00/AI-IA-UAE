@@ -17,6 +17,8 @@ venv/
 !.env.example
 *.pem
 *.key
+*.tfvars
+!*.tfvars.example
 
 # Coverage
 .coverage
