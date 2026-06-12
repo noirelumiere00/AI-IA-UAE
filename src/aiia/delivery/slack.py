@@ -225,7 +225,14 @@ def _reminder_line(v: Any) -> str:
         line = f"{badge}　メンション {who} in {ch}".rstrip()
         return line + (f"\n_{body}_" if body else "")
     cat = _CAT_LABEL.get(v.category, "未返信")
-    return f"{badge}　〔{cat}〕 *{_short_sender(getattr(v, 'sender', ''))}* — {_remind_subject_link(v)}"
+    line = f"{badge}　〔{cat}〕 *{_short_sender(getattr(v, 'sender', ''))}* — {_remind_subject_link(v)}"
+    # §V4 単一アプリ化：返信は markdown リンク（`<url|…>`）で出す。button だと OpenClaw が
+    # Socket Mode を握る共用アプリでは interaction が宙に浮き警告が出るが、リンクは interaction
+    # ゼロ＝ack 不要で安全。クリック→ /reply（署名検証→全返信下書き作成→Gmail該当スレッドへ302）。
+    ru = getattr(v, "reply_url", None)
+    if ru:
+        line += f"　<{ru}|✏️ 対応する>"
+    return line
 
 
 def _subject_link(it: DigestItem) -> str:

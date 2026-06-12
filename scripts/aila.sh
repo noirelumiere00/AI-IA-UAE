@@ -71,6 +71,9 @@ print('連携済み:', DynamoDbTokenStore(os.environ['AIIA_DDB_TABLE'],KmsCipher
   batch)  # 連携済み全員へ朝ダイジェスト配信（Slack認可者は未返信メンションも合流）
     $PY -m aiia.orchestrator.run_batch
     ;;
+  notify)  # §V3 カレンダー予定の5分前メンション。毎分 systemd timer / cron から呼ぶ（claimで二重送信なし）
+    $PY -m aiia.notify.run_calendar_notify
+    ;;
   serve)
     $PY -m aiia.runtime.slack_app
     ;;

@@ -105,3 +105,21 @@ def test_reminder_actions_url_button_vs_action() -> None:
     assert "value" not in btn  # url-button は value を載せない（handlerがackのみで判別）
     a = _reminder_actions("t1")  # reply_url 無し＝従来の action-button
     assert a["elements"][0].get("value") == "t1" and "url" not in a["elements"][0]
+
+
+def test_reminder_line_uses_markdown_reply_link_for_single_app() -> None:
+    # §V4 単一アプリ化：朝バッチ(interactive=False)の本文に「対応する」を markdown リンクで載せる。
+    # button だと共用アプリ(OpenClawがSocket Mode保持)で interaction が宙に浮くため、リンクで安全。
+    from aiia.delivery.slack import _reminder_line
+    from aiia.schemas import Category, ReminderView
+
+    v = ReminderView(
+        thread_id="t1", category=Category.CLIENT_NORMAL,
+        subject="見積の件", sender="田中 <tanaka@x.co>",
+        reply_url="https://aila.example/reply?s=sig",
+    )
+    line = _reminder_line(v)
+    assert "<https://aila.example/reply?s=sig|" in line and "対応する" in line
+    # reply_url 無し＝リンクを出さない（壊れたリンクを置かない）
+    v2 = ReminderView(thread_id="t2", category=Category.CLIENT_NORMAL, subject="x", sender="y")
+    assert "対応する" not in _reminder_line(v2)
