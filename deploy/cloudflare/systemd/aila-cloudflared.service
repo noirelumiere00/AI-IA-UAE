@@ -1,0 +1,19 @@
+[Unit]
+Description=AiLa cloudflared tunnel (connect.vectorinc.co.jp -> localhost:8788 / inbound 0)
+After=network-online.target
+Wants=network-online.target
+# connect-web が先に上がっているのが望ましいが、cloudflared は connect-web 不在でも
+# 起動でき、connect-web 復帰後に自動で疎通するため強い依存にはしない（Restart で吸収）。
+Wants=aila-connect.service
+
+[Service]
+Type=simple
+# /etc/cloudflared/config.yml（= deploy/cloudflare/cloudflared-config.yml を配置したもの）を読む。
+# cloudflared は外向き接続のみ。受信ポートは一切開かない。
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=always
+RestartSec=5
+User=aila
+
+[Install]
+WantedBy=multi-user.target

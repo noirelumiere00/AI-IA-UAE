@@ -1,0 +1,60 @@
+# ============================================================
+# AiLa connect-web を Cloudflare Tunnel で公開する ingress 設定
+# 採用方式 = Plan C（Cloudflare Tunnel + Cloudflare Access）
+# ------------------------------------------------------------
+# 役割: このホスト(Shogo管理の常時起動機)上で cloudflared を常駐させ、
+#   会社ドメイン connect.vectorinc.co.jp への外部アクセスを
+#   ローカルの connect-web(http://localhost:8788) に橋渡しする。
+#
+# 重要: cloudflared は **外向き接続のみ** で Cloudflare エッジにトンネルを張る。
+#   このホストで受信ポートを一切開かない＝攻撃面ゼロ（inbound 0）。
+#
+# 配置先(systemd 運用時): /etc/cloudflared/config.yml
+#   （cloudflared が /etc/cloudflared/ または ~/.cloudflared/ を見る）
+# macOS で常駐させる場合は ~/.cloudflared/config.yml でも可。
+# ============================================================
+
+# --- トンネル識別子 ---
+# <TUNNEL_UUID> は `cloudflared tunnel create aila-connect` の出力に表示される UUID に置換。
+#   例) Created tunnel aila-connect with id 0a1b2c3d-....
+# credentials-file は同コマンドが生成する JSON のフルパス。秘密情報なのでコミット禁止。
+#   作成手順は RUNBOOK.md ステップ1 を参照。
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+# --- プロトコル ---
+# http2 を明示（既存 aila.sh の trycloudflare 起動と同じ流儀）。環境により quic でも可。
+protocol: http2
+
+# --- ログ ---
+loglevel: info
+
+# --- ingress ルール（上から順に評価。最後は必ず catch-all） ---
+ingress:
+  # 会社ドメイン宛のリクエストのみ connect-web へ。
+  # connect-web の待受は CONNECT_HOST=127.0.0.1 / CONNECT_PORT=8788（既定値）。
+  # 公開するパスは connect-web 側の実装に準拠:
+  #   /oauth2/callback        ... Google OAuth コールバック（常時）
+  #   /oauth2/slack/callback  ... Slack User OAuth コールバック（SLACK_CLIENT_ID 設定時のみ生える）
+  #   /reply                  ... 返信ドラフト url-button（署名検証あり）
+  #   /healthz                ... 死活確認
+  - hostname: connect.vectorinc.co.jp
+    service: http://localhost:8788
+    originRequest:
+      # オリジンは平文HTTP(localhost)。TLS終端は Cloudflare エッジが担当。
+      # connect-web は Host ヘッダに依存しないが、念のためエッジのHostをそのまま透過。
+      httpHostHeader: connect.vectorinc.co.jp
+      # アイドル接続のタイムアウト等は既定で十分。必要時のみ調整。
+      connectTimeout: 30s
+
+  # Cloudflare for SaaS の Fallback Origin 経由でエッジが Host を書き換えるケースに備えた保険。
+  # `connect-origin.<あなたのCloudflareゾーン>` はトンネル用オリジン名（RUNBOOK ステップ2-1で作る）。
+  # vectorinc.co.jp は Cloudflare 管理外なので、トンネルが受けるのはこの自ゾーン名経由になる。
+  - hostname: connect-origin.vseoanalytics.com   # ← あなたの Cloudflare ゾーン名に読み替え
+    service: http://localhost:8788
+    originRequest:
+      connectTimeout: 30s
+
+  # それ以外（直 IP アクセス・別ホスト名・探索スキャン等）はすべて 404 で握りつぶす。
+  # → このトンネルからは上記2ホスト名以外には到達できない。
+  - service: http_status:404

@@ -1,0 +1,56 @@
+# ============================================================
+# AiLa 専用 Slack アプリ マニフェスト（§V）
+# ============================================================
+# 用途: api.slack.com/apps → Create New App → "From an app manifest" に貼り付け。
+#   1枚で三役を構成する＝(a)bot配信 (b)Socket Mode ボタン対話 (c)User OAuth(xoxp)。
+#
+# ⚠️ redirect_urls は connect_web の公開URL（cloudflared/EC2）に**後で差し替え**。
+#    まず作成→トークン取得→公開URL確定後に OAuth & Permissions で Redirect URL を更新。
+#    （Slackは複数 redirect URL 可・後編集可。作成時は下のプレースホルダのままでよい）
+#
+# 名前は「AiLa（メール秘書）」＝会社ナレッジの OpenClaw(現「AiLa」) と区別。任意で変更可。
+# ============================================================
+display_information:
+  name: AiLa（メール秘書）
+  description: 朝のメール要約・予定5分前通知・返信下書きを各自のSlackへ
+  background_color: "#1f2d3d"
+
+features:
+  bot_user:
+    display_name: AiLa
+    always_online: true
+  slash_commands:
+    - command: /connect
+      description: Google Workspace と Slack を連携する
+      should_escape: false
+
+oauth_config:
+  # 後で公開URL（例: https://aila-connect.example.com/oauth2/slack/callback）に差し替え
+  redirect_urls:
+    - https://REPLACE-WITH-PUBLIC-HOST/oauth2/slack/callback
+  scopes:
+    # 本人のSlackを読む User Token(xoxp)＝slack_oauth.py DEFAULT_USER_SCOPES（未返信メンション検知）
+    user:
+      - search:read
+      - channels:history
+      - groups:history
+      - mpim:history
+    # bot＝配信・ボタン・スラッシュコマンド
+    bot:
+      - chat:write          # ダイジェスト/通知の送信
+      - im:write            # 本人DMを開く（conversations.open）
+      - im:history          # DM内のボタン文脈
+      - users:read          # 実名解決
+      - users:read.email    # email→Slackユーザー特定（lookupByEmail）
+      - channels:history    # 文体grounding/未返信
+      - groups:history
+      - mpim:history
+      - reactions:write     # 受付/完了リアクション
+      - commands            # /connect
+
+settings:
+  interactivity:
+    is_enabled: true        # 編集/削除/送信ボタン（Socket Mode経由＝request_url不要）
+  socket_mode_enabled: true # 公開エンドポイント不要・outbound WebSocketのみ
+  org_deploy_enabled: false
+  token_rotation_enabled: false
